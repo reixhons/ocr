@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Upload, X, Image as ImageIcon } from 'lucide-react';
 import UTIF from 'utif';
+import ImageViewer from '../components/ImageViewer';
 
 function HomeTwo() {
     const [images, setImages] = useState([]);
@@ -219,28 +220,12 @@ function HomeTwo() {
                     </div>
                 )}
 
-                {/* Image Preview Modal */}
+                {/* Image Preview Modal - replaced with ImageViewer component */}
                 {selectedImage && (
-                    <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm p-4">
-                        <div className="relative max-w-5xl w-full bg-white rounded-xl overflow-hidden shadow-2xl">
-                            <div className="bg-indigo-700 text-white p-4 flex justify-between items-center">
-                                <h3 className="font-medium">Image Preview</h3>
-                                <button
-                                    onClick={() => setSelectedImage(null)}
-                                    className="text-white hover:text-red-200 transition-colors"
-                                >
-                                    <X className="w-6 h-6" />
-                                </button>
-                            </div>
-                            <div className="p-4 bg-gray-100">
-                                <img
-                                    src={selectedImage}
-                                    alt="Preview"
-                                    className="w-full h-auto max-h-[70vh] object-contain mx-auto"
-                                />
-                            </div>
-                        </div>
-                    </div>
+                    <ImageViewer
+                        imageUrl={selectedImage}
+                        onClose={() => setSelectedImage(null)}
+                    />
                 )}
 
                 {/* Empty State */}
