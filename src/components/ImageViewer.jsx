@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { X, Info, AlertCircle } from 'lucide-react';
+import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
 
 // Fallback demo rectangles if no JSON data is provided
 const demoRectangles = [
@@ -52,11 +52,15 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
     const containerRef = useRef(null);
     const imageRef = useRef(null);
     const [scale, setScale] = useState(1);
+    const [position, setPosition] = useState({ x: 0, y: 0 });
     const [selectedRect, setSelectedRect] = useState(null);
     const [pageWidth, setPageWidth] = useState(0);
     const [pageHeight, setPageHeight] = useState(0);
     const [scaleFactorX, setScaleFactorX] = useState(1);
     const [scaleFactorY, setScaleFactorY] = useState(1);
+
+    // Remove dragging-related state
+    const ARROW_KEY_MOVE_AMOUNT = 30; // Pixels to move with each arrow key press
 
     // Process JSON data to create rectangles
     const rectangles = useMemo(() => {
@@ -107,8 +111,8 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             } else if (imageData.jsonData.results && Array.isArray(imageData.jsonData.results)) {
                 // Handle single page format
                 if (imageData.jsonData.page_width && imageData.jsonData.page_heigth) {
-                    setPageWidth(imageData.jsonData.page_width);
-                    setPageHeight(imageData.jsonData.page_heigth);
+                    setPageWidth(imageData.jsonData[0].page_width);
+                    setPageHeight(imageData.jsonData[0].page_heigth);
                 }
 
                 return imageData.jsonData.results.map((item, index) => {
@@ -203,18 +207,77 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         });
     };
 
+    // Calculate the fitting scale for the initial view
+    const calculateFitScale = () => {
+        if (!containerRef.current || !imageRef.current) return 1;
+
+        const container = containerRef.current;
+        const image = imageRef.current;
+
+        // Reduce padding to maximize visible area
+        const containerWidth = container.clientWidth - 20; // Minimal padding
+        const containerHeight = container.clientHeight - 20; // Minimal padding
+
+        // Calculate scale factors to fit image in container
+        const scaleX = containerWidth / image.width;
+        const scaleY = containerHeight / image.height;
+
+        // Use the smaller of the two to ensure the entire image fits
+        let fitScale = Math.min(scaleX, scaleY);
+
+        // Don't cap at 1 for TIF files to ensure they're fully visible
+        // This allows proper scaling for very large TIF images
+        return fitScale;
+    };
+
+    // Reset view to fit the entire image on screen
+    const handleFitToScreen = () => {
+        const fitScale = calculateFitScale();
+
+        // Center the image after fitting
+        const container = containerRef.current;
+        const image = imageRef.current;
+
+        if (container && image) {
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            const scaledWidth = image.width * fitScale;
+            const scaledHeight = image.height * fitScale;
+
+            // Correct centering calculation
+            const newPosX = (containerWidth - scaledWidth) / 2;
+            const newPosY = (containerHeight - scaledHeight) / 2;
+
+            setScale(fitScale);
+            setPosition({ x: newPosX, y: newPosY });
+        } else {
+            setScale(fitScale);
+            setPosition({ x: 0, y: 0 });
+        }
+    };
+
     // Handle canvas click to detect rectangle selections
     const handleCanvasClick = (e) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const rect = canvas.getBoundingClientRect();
-        const x = (e.clientX - rect.left) / scale;
-        const y = (e.clientY - rect.top) / scale;
+        // Get the click position on the canvas (already includes parent's translation)
+        const canvasX = e.clientX - rect.left;
+        const canvasY = e.clientY - rect.top;
 
-        // Check if click is inside any rectangle
+        // Map from canvas coordinates to image coordinates
+        const imageX = canvasX / scale;
+        const imageY = canvasY / scale;
+
+        console.log('Click at image coordinates:', imageX, imageY);
+
         let clickedRect = null;
-        for (const rectangle of rectangles) {
+
+        // Process rectangles in reverse order to select the top-most one first
+        for (let i = rectangles.length - 1; i >= 0; i--) {
+            const rectangle = rectangles[i];
+
             // Apply scaling factors for JSON-based coordinates
             const rectX = rectangle.x * scaleFactorX;
             const rectY = rectangle.y * scaleFactorY;
@@ -222,12 +285,13 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             const rectHeight = rectangle.height * scaleFactorY;
 
             if (
-                x >= rectX &&
-                x <= rectX + rectWidth &&
-                y >= rectY &&
-                y <= rectY + rectHeight
+                imageX >= rectX &&
+                imageX <= rectX + rectWidth &&
+                imageY >= rectY &&
+                imageY <= rectY + rectHeight
             ) {
                 clickedRect = rectangle;
+                console.log('Selected rectangle:', rectangle.id);
                 break;
             }
         }
@@ -235,19 +299,63 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         setSelectedRect(clickedRect);
     };
 
+
     // Handle zoom in/out
     const handleZoom = (zoomIn) => {
         setScale(prevScale => {
-            const newScale = zoomIn ? prevScale * 1.2 : prevScale / 1.2;
-            return Math.max(0.5, Math.min(newScale, 3)); // Limit zoom between 0.5x and 3x
+            const zoomFactor = zoomIn ? 1.1 : 0.9; // Smaller increments
+            const newScale = prevScale * zoomFactor;
+            return Math.max(0.1, Math.min(newScale, 5));
         });
+    };
+
+    // Handle zoom via slider
+    const handleZoomSlider = (e) => {
+        const zoomValue = parseFloat(e.target.value);
+        setScale(zoomValue);
+    };
+
+    // Handle mouse wheel for zooming - disabled as requested
+    const handleWheel = (e) => {
+        // Only prevent default to avoid page scrolling, but don't zoom
+        e.preventDefault();
+    };
+
+    // Handle keyboard navigation and shortcuts
+    const handleKeyDown = (e) => {
+        if (e.key === '+' || e.key === '=') {
+            // Plus key pressed - zoom in
+            handleZoom(true);
+            e.preventDefault();
+        } else if (e.key === '-' || e.key === '_') {
+            // Minus key pressed - zoom out
+            handleZoom(false);
+            e.preventDefault();
+        } else if (e.key === 'ArrowUp') {
+            // Move image down (viewport up)
+            setPosition(prev => ({ ...prev, y: prev.y + ARROW_KEY_MOVE_AMOUNT }));
+            e.preventDefault();
+        } else if (e.key === 'ArrowDown') {
+            // Move image up (viewport down)
+            setPosition(prev => ({ ...prev, y: prev.y - ARROW_KEY_MOVE_AMOUNT }));
+            e.preventDefault();
+        } else if (e.key === 'ArrowLeft') {
+            // Move image right (viewport left)
+            setPosition(prev => ({ ...prev, x: prev.x + ARROW_KEY_MOVE_AMOUNT }));
+            e.preventDefault();
+        } else if (e.key === 'ArrowRight') {
+            // Move image left (viewport right)
+            setPosition(prev => ({ ...prev, x: prev.x - ARROW_KEY_MOVE_AMOUNT }));
+            e.preventDefault();
+        }
     };
 
     useEffect(() => {
         const canvas = canvasRef.current;
         const image = imageRef.current;
+        const container = containerRef.current;
 
-        if (!canvas || !image || !imageUrl) return;
+        if (!canvas || !image || !imageUrl || !container) return;
 
         // When image loads, set up canvas and draw
         image.onload = () => {
@@ -255,37 +363,91 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             canvas.width = image.width;
             canvas.height = image.height;
 
+            // Calculate fitting scale and center the image
+            const fitScale = calculateFitScale();
+            setScale(fitScale);
+
+            // Center the image
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+            const scaledWidth = image.width * fitScale;
+            const scaledHeight = image.height * fitScale;
+
+            // Correct centering calculation
+            const newPosX = (containerWidth - scaledWidth) / 2;
+            const newPosY = (containerHeight - scaledHeight) / 2;
+
+            setPosition({
+                x: newPosX,
+                y: newPosY
+            });
+
             // Draw image and rectangles
             drawCanvas();
+
+            // Call handleFitToScreen again after a short delay to ensure proper centering
+            setTimeout(handleFitToScreen, 100);
         };
 
         // Set image source to trigger load
         image.src = imageUrl;
+
+        // Add event listener for wheel events to prevent default behavior only
+        container.addEventListener('wheel', handleWheel, { passive: false });
+
+        // Add keyboard event listener for zoom shortcuts and arrow navigation
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            // Clean up event listeners
+            container.removeEventListener('wheel', handleWheel);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
     }, [imageUrl]);
 
     // Redraw when selected rectangle, scale or scaling factors change
     useEffect(() => {
         drawCanvas();
-    }, [selectedRect, scale, scaleFactorX, scaleFactorY]);
+    }, [selectedRect, scale, scaleFactorX, scaleFactorY, position]);
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm p-4">
-            <div className="relative max-w-6xl w-full bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col h-[90vh]">
+        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm p-2">
+            <div className="relative w-full h-full bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col">
                 <div className="bg-indigo-700 text-white p-4 flex justify-between items-center">
                     <h3 className="font-medium">Image Viewer with Annotations</h3>
                     <div className="flex items-center space-x-4">
                         <button
-                            onClick={() => handleZoom(true)}
-                            className="px-3 py-1 bg-indigo-800 rounded hover:bg-indigo-900"
+                            onClick={handleFitToScreen}
+                            className="px-3 py-1 bg-indigo-800 rounded hover:bg-indigo-900 flex items-center gap-1"
+                            title="Fit to screen"
                         >
-                            Zoom +
+                            <Maximize className="w-4 h-4" />
+                            <span>Fit</span>
                         </button>
-                        <button
-                            onClick={() => handleZoom(false)}
-                            className="px-3 py-1 bg-indigo-800 rounded hover:bg-indigo-900"
-                        >
-                            Zoom -
-                        </button>
+                        <div className="flex items-center bg-indigo-800 rounded px-2 py-1">
+                            <button
+                                onClick={() => handleZoom(false)}
+                                className="text-white hover:text-gray-200 p-1"
+                            >
+                                <ZoomOut className="w-4 h-4" />
+                            </button>
+                            <input
+                                type="range"
+                                min="0.1"
+                                max="5"
+                                step="0.1"
+                                value={scale}
+                                onChange={handleZoomSlider}
+                                className="w-24 mx-2"
+                            />
+                            <button
+                                onClick={() => handleZoom(true)}
+                                className="text-white hover:text-gray-200 p-1"
+                            >
+                                <ZoomIn className="w-4 h-4" />
+                            </button>
+                            <span className="ml-2 text-xs">{Math.round(scale * 100)}%</span>
+                        </div>
                         <button
                             onClick={onClose}
                             className="text-white hover:text-red-200 transition-colors"
@@ -299,9 +461,15 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                     {/* Canvas Container */}
                     <div
                         ref={containerRef}
-                        className="flex-1 p-4 bg-gray-800 overflow-auto flex justify-center items-center"
+                        className="flex-1 p-1 bg-gray-800 overflow-hidden flex justify-center items-center cursor-default"
+                        onClick={handleCanvasClick}
+                        tabIndex="0" // Make container focusable for keyboard navigation
                     >
-                        <div className="relative">
+                        <div className="relative touch-none"
+                            style={{
+                                transform: `translate(${position.x}px, ${position.y}px)`,
+                            }}
+                        >
                             {/* Hidden image used to load and size the canvas */}
                             <img
                                 ref={imageRef}
@@ -312,10 +480,9 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                             {/* Canvas where image and rectangles are drawn */}
                             <canvas
                                 ref={canvasRef}
-                                onClick={handleCanvasClick}
                                 style={{
                                     transform: `scale(${scale})`,
-                                    transformOrigin: 'top left',
+                                    transformOrigin: 'center',
                                     cursor: 'pointer'
                                 }}
                             />
@@ -339,6 +506,13 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 <p>Using demo annotations. Upload a matching JSON file to see actual text regions.</p>
                             </div>
                         )}
+
+                        <div className="mb-4 bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-700">
+                            <p className="font-medium">Navigation</p>
+                            <p className="text-xs mt-1">
+                                Use arrow keys to navigate around the image
+                            </p>
+                        </div>
 
                         {selectedRect ? (
                             <div className="bg-white p-4 rounded-lg shadow-md">
