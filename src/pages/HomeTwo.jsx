@@ -6,7 +6,9 @@ import ImageViewer from '../components/ImageViewer';
 function HomeTwo() {
     const [images, setImages] = useState([]);
     const [selectedImage, setSelectedImage] = useState(null);
+    const [selectedImageData, setSelectedImageData] = useState(null);
     const fileInputRef = useRef(null);
+    const jsonFileInputRef = useRef(null);
 
     const convertTiffToCanvas = async (file) => {
         return new Promise((resolve, reject) => {
@@ -45,7 +47,11 @@ function HomeTwo() {
 
                     // Convert canvas to data URL
                     const dataUrl = canvas.toDataURL('image/png');
-                    resolve(dataUrl);
+                    resolve({
+                        url: dataUrl,
+                        width: firstImage.width,
+                        height: firstImage.height
+                    });
                 } catch (error) {
                     console.error('Error processing TIFF:', error);
                     reject(error);
@@ -53,6 +59,23 @@ function HomeTwo() {
             };
             reader.onerror = () => reject(new Error('Failed to read file'));
             reader.readAsArrayBuffer(file);
+        });
+    };
+
+    const parseJsonFile = (file) => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const jsonData = JSON.parse(e.target.result);
+                    resolve(jsonData);
+                } catch (error) {
+                    console.error('Error parsing JSON:', error);
+                    reject(error);
+                }
+            };
+            reader.onerror = () => reject(new Error('Failed to read JSON file'));
+            reader.readAsText(file);
         });
     };
 
@@ -70,8 +93,29 @@ function HomeTwo() {
                 const newImages = await Promise.all(
                     tiffFiles.map(async (file) => {
                         try {
-                            const url = await convertTiffToCanvas(file);
-                            return { file, url };
+                            const imageResult = await convertTiffToCanvas(file);
+
+                            // Look for corresponding JSON file with the same name
+                            const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
+                            const jsonFileName = `${baseName}.json`;
+
+                            // Check if there's a JSON file with the same name in the selected files
+                            const jsonFile = Array.from(e.target.files).find(f =>
+                                f.name.toLowerCase() === jsonFileName.toLowerCase()
+                            );
+
+                            let jsonData = null;
+                            if (jsonFile) {
+                                jsonData = await parseJsonFile(jsonFile);
+                            }
+
+                            return {
+                                file,
+                                url: imageResult.url,
+                                width: imageResult.width,
+                                height: imageResult.height,
+                                jsonData
+                            };
                         } catch (error) {
                             console.error(`Error processing file ${file.name}:`, error);
                             alert(`Error processing file ${file.name}: ${error.message}`);
@@ -96,6 +140,50 @@ function HomeTwo() {
         }
     };
 
+    const handleJsonUpload = async (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const jsonFiles = Array.from(e.target.files)
+                .filter(file => file.type === 'application/json' || file.name.toLowerCase().endsWith('.json'));
+
+            if (jsonFiles.length === 0) {
+                alert('Please select JSON files only.');
+                return;
+            }
+
+            try {
+                // Process each JSON file
+                for (const jsonFile of jsonFiles) {
+                    try {
+                        const jsonData = await parseJsonFile(jsonFile);
+
+                        // Find the corresponding image by name
+                        const baseName = jsonFile.name.substring(0, jsonFile.name.lastIndexOf('.'));
+                        const imageIndex = images.findIndex(img =>
+                            img.file.name.substring(0, img.file.name.lastIndexOf('.')).toLowerCase() === baseName.toLowerCase()
+                        );
+
+                        if (imageIndex !== -1) {
+                            // Update the image with the JSON data
+                            setImages(prev => {
+                                const newImages = [...prev];
+                                newImages[imageIndex] = {
+                                    ...newImages[imageIndex],
+                                    jsonData
+                                };
+                                return newImages;
+                            });
+                        }
+                    } catch (error) {
+                        console.error(`Error processing JSON file ${jsonFile.name}:`, error);
+                    }
+                }
+            } catch (error) {
+                console.error('Error processing JSON files:', error);
+                alert('Error processing JSON files. Please try again.');
+            }
+        }
+    };
+
     const removeImage = (index) => {
         setImages(prev => {
             const newImages = [...prev];
@@ -104,17 +192,26 @@ function HomeTwo() {
         });
         if (selectedImage === images[index].url) {
             setSelectedImage(null);
+            setSelectedImageData(null);
         }
     };
 
     const handleDrop = async (e) => {
         e.preventDefault();
         if (e.dataTransfer.files) {
-            const tiffFiles = Array.from(e.dataTransfer.files)
-                .filter(file => file.type === 'image/tiff' || file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff'));
+            const allFiles = Array.from(e.dataTransfer.files);
+            const tiffFiles = allFiles.filter(file =>
+                file.type === 'image/tiff' ||
+                file.name.toLowerCase().endsWith('.tif') ||
+                file.name.toLowerCase().endsWith('.tiff')
+            );
+            const jsonFiles = allFiles.filter(file =>
+                file.type === 'application/json' ||
+                file.name.toLowerCase().endsWith('.json')
+            );
 
             if (tiffFiles.length === 0) {
-                alert('Please upload TIF or TIFF files only.');
+                alert('Please upload at least one TIF or TIFF file.');
                 return;
             }
 
@@ -122,8 +219,29 @@ function HomeTwo() {
                 const newImages = await Promise.all(
                     tiffFiles.map(async (file) => {
                         try {
-                            const url = await convertTiffToCanvas(file);
-                            return { file, url };
+                            const imageResult = await convertTiffToCanvas(file);
+
+                            // Look for corresponding JSON file with the same name
+                            const baseName = file.name.substring(0, file.name.lastIndexOf('.'));
+                            const jsonFileName = `${baseName}.json`;
+
+                            // Find the JSON file with matching name
+                            const jsonFile = jsonFiles.find(f =>
+                                f.name.toLowerCase() === jsonFileName.toLowerCase()
+                            );
+
+                            let jsonData = null;
+                            if (jsonFile) {
+                                jsonData = await parseJsonFile(jsonFile);
+                            }
+
+                            return {
+                                file,
+                                url: imageResult.url,
+                                width: imageResult.width,
+                                height: imageResult.height,
+                                jsonData
+                            };
                         } catch (error) {
                             console.error(`Error processing file ${file.name}:`, error);
                             alert(`Error processing file ${file.name}: ${error.message}`);
@@ -146,12 +264,21 @@ function HomeTwo() {
         e.preventDefault();
     };
 
+    const handleImageClick = (image) => {
+        setSelectedImage(image.url);
+        setSelectedImageData({
+            width: image.width,
+            height: image.height,
+            jsonData: image.jsonData
+        });
+    };
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6 md:p-8">
             <div className="max-w-6xl mx-auto">
                 <div className="text-center mb-8">
                     <h1 className="text-4xl font-bold text-indigo-800 mb-2 tracking-tight">TIF Image Viewer</h1>
-                    <p className="text-gray-600 max-w-xl mx-auto">Upload, view and manage your TIF images with ease</p>
+                    <p className="text-gray-600 max-w-xl mx-auto">Upload, view and edit your TIF images with annotations</p>
                 </div>
 
                 {/* Upload Area */}
@@ -165,23 +292,43 @@ function HomeTwo() {
                             <Upload className="w-8 h-8 text-indigo-600" />
                         </div>
                         <p className="text-xl font-semibold text-gray-800 mb-2">
-                            Drag and drop your TIF images here
+                            Drag and drop your TIF images and JSON files here
                         </p>
                         <p className="text-gray-500 mb-4">or</p>
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            onChange={handleFileChange}
-                            accept=".tif,.tiff"
-                            multiple
-                            className="hidden"
-                        />
-                        <button
-                            onClick={() => fileInputRef.current?.click()}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-lg font-medium transition duration-200 shadow-md hover:shadow-lg"
-                        >
-                            Select Files
-                        </button>
+                        <div className="flex justify-center space-x-4">
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                onChange={handleFileChange}
+                                accept=".tif,.tiff,.json"
+                                multiple
+                                className="hidden"
+                            />
+                            <button
+                                onClick={() => fileInputRef.current?.click()}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-lg font-medium transition duration-200 shadow-md hover:shadow-lg"
+                            >
+                                Select Files
+                            </button>
+
+                            <input
+                                type="file"
+                                ref={jsonFileInputRef}
+                                onChange={handleJsonUpload}
+                                accept=".json"
+                                multiple
+                                className="hidden"
+                            />
+                            <button
+                                onClick={() => jsonFileInputRef.current?.click()}
+                                className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium transition duration-200 shadow-md hover:shadow-lg"
+                            >
+                                Add JSON Only
+                            </button>
+                        </div>
+                        <p className="text-gray-500 text-sm mt-4">
+                            TIF and JSON files with matching names will be linked automatically
+                        </p>
                     </div>
                 </div>
 
@@ -200,8 +347,13 @@ function HomeTwo() {
                                             src={image.url}
                                             alt={`Upload ${index + 1}`}
                                             className="w-full h-full object-contain cursor-pointer transition-transform hover:scale-105"
-                                            onClick={() => setSelectedImage(image.url)}
+                                            onClick={() => handleImageClick(image)}
                                         />
+                                        {image.jsonData && (
+                                            <div className="absolute top-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+                                                JSON
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="p-3">
                                         <p className="text-sm text-gray-600 truncate">
@@ -224,7 +376,11 @@ function HomeTwo() {
                 {selectedImage && (
                     <ImageViewer
                         imageUrl={selectedImage}
-                        onClose={() => setSelectedImage(null)}
+                        imageData={selectedImageData}
+                        onClose={() => {
+                            setSelectedImage(null);
+                            setSelectedImageData(null);
+                        }}
                     />
                 )}
 
@@ -235,7 +391,7 @@ function HomeTwo() {
                             <ImageIcon className="w-10 h-10 text-gray-400" />
                         </div>
                         <p className="text-gray-500 text-lg">No images uploaded yet</p>
-                        <p className="text-gray-400 text-sm mt-2">Upload TIF images to view them here</p>
+                        <p className="text-gray-400 text-sm mt-2">Upload TIF images and JSON files to view them here</p>
                     </div>
                 )}
             </div>
