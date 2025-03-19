@@ -62,9 +62,10 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
     const [scaleFactorY, setScaleFactorY] = useState(1);
     const [clickStartPos, setClickStartPos] = useState({ x: 0, y: 0 });
     const [hasMovedDuringClick, setHasMovedDuringClick] = useState(false);
+    const [rectangles, setRectangles] = useState([]);
 
     // Process JSON data to create rectangles
-    const rectangles = useMemo(() => {
+    const processJsonData = useMemo(() => {
         if (!imageData?.jsonData) return demoRectangles;
 
         try {
@@ -152,6 +153,11 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         // Fallback to demo rectangles if JSON processing fails
         return demoRectangles;
     }, [imageData]);
+
+    // Use effect to set rectangles when processJsonData changes
+    useEffect(() => {
+        setRectangles(processJsonData);
+    }, [processJsonData]);
 
     // Calculate scaling factors when page dimensions and image dimensions are available
     useEffect(() => {
@@ -415,6 +421,30 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         }
     };
 
+    // Handle text edit for the selected rectangle
+    const handleTextEdit = (e) => {
+        if (!selectedRect) return;
+
+        const updatedText = e.target.value;
+        const updatedRectangles = rectangles.map(rect =>
+            rect.id === selectedRect.id
+                ? { ...rect, text: updatedText }
+                : rect
+        );
+
+        setRectangles(updatedRectangles);
+        setSelectedRect({ ...selectedRect, text: updatedText });
+    };
+
+    // Delete the selected rectangle
+    const handleDeleteRect = () => {
+        if (!selectedRect) return;
+
+        const updatedRectangles = rectangles.filter(rect => rect.id !== selectedRect.id);
+        setRectangles(updatedRectangles);
+        setSelectedRect(null);
+    };
+
     useEffect(() => {
         const canvas = canvasRef.current;
         const image = imageRef.current;
@@ -470,10 +500,10 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         };
     }, [imageUrl]);
 
-    // Redraw when selected rectangle, scale or scaling factors change
+    // Redraw when selected rectangle, scale, scaling factors or rectangles change
     useEffect(() => {
         drawCanvas();
-    }, [selectedRect, scale, scaleFactorX, scaleFactorY]);
+    }, [selectedRect, scale, scaleFactorX, scaleFactorY, rectangles]);
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm p-2">
@@ -603,10 +633,21 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 </div>
 
                                 <div className="border-t pt-2">
-                                    <p className="font-medium text-sm text-gray-700 mb-1">Detected Text:</p>
-                                    <p className="text-gray-900 bg-gray-50 p-2 rounded border border-gray-100">
-                                        {selectedRect.text || selectedRect.info}
-                                    </p>
+                                    <div className="flex justify-between items-center">
+                                        <p className="font-medium text-sm text-gray-700 mb-1">Detected Text:</p>
+                                        <button
+                                            onClick={handleDeleteRect}
+                                            className="text-red-600 hover:text-red-800 text-sm px-2 py-1 rounded bg-red-50 hover:bg-red-100"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        value={selectedRect.text || selectedRect.info}
+                                        onChange={handleTextEdit}
+                                        className="text-gray-900 bg-gray-50 p-3 rounded border border-gray-200 w-full min-h-[150px] max-h-[300px] resize-y font-normal text-base leading-relaxed focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50"
+                                        placeholder="Edit detected text here..."
+                                    />
                                 </div>
 
                                 {selectedRect.vertices && selectedRect.vertices.length > 0 && (
