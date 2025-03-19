@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize } from 'lucide-react';
+import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize, Trash2, Plus, Square } from 'lucide-react';
 
 // Fallback demo rectangles if no JSON data is provided
 const demoRectangles = [
@@ -63,6 +63,10 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
     const [clickStartPos, setClickStartPos] = useState({ x: 0, y: 0 });
     const [hasMovedDuringClick, setHasMovedDuringClick] = useState(false);
     const [rectangles, setRectangles] = useState([]);
+    const [drawingMode, setDrawingMode] = useState(false);
+    const [drawStartPos, setDrawStartPos] = useState({ x: 0, y: 0 });
+    const [tempRect, setTempRect] = useState(null);
+    const [nextRectId, setNextRectId] = useState(1);
 
     // Process JSON data to create rectangles
     const processJsonData = useMemo(() => {
@@ -212,6 +216,21 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             ctx.strokeText(rect.label, x + 5, y + 15);
             ctx.fillText(rect.label, x + 5, y + 15);
         });
+
+        // Draw temporary rectangle during drawing
+        if (drawingMode && tempRect) {
+            ctx.fillStyle = 'rgba(0, 100, 255, 0.3)';
+            ctx.strokeStyle = 'rgba(0, 100, 255, 0.8)';
+            ctx.lineWidth = 2;
+
+            const x = tempRect.x * scaleFactorX;
+            const y = tempRect.y * scaleFactorY;
+            const width = tempRect.width * scaleFactorX;
+            const height = tempRect.height * scaleFactorY;
+
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeRect(x, y, width, height);
+        }
     };
 
     // Calculate the fitting scale for the initial view
@@ -292,12 +311,51 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         return false;
     };
 
-    // Handle mouse down for dragging
+    // Toggle drawing mode for adding new rectangles
+    const toggleDrawingMode = () => {
+        setDrawingMode(!drawingMode);
+        // Clear any selected rectangle when entering drawing mode
+        if (!drawingMode) {
+            setSelectedRect(null);
+            setTempRect(null);
+        }
+    };
+
+    // Handle mouse down for dragging or drawing
     const handleMouseDown = (e) => {
         if (e.button !== 0) return; // Only handle left mouse button
 
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const canvasX = (e.clientX - rect.left);
+        const canvasY = (e.clientY - rect.top);
+
+        // Convert to image coordinates (accounting for current scale and position)
+        const imageX = (canvasX / scale);
+        const imageY = (canvasY / scale);
+
         const clickPos = { x: e.clientX, y: e.clientY };
         setClickStartPos(clickPos);
+
+        if (drawingMode) {
+            // Start drawing a new rectangle
+            const startPosInImage = {
+                x: imageX / scaleFactorX, // Convert back to original coordinates
+                y: imageY / scaleFactorY
+            };
+
+            setDrawStartPos(startPosInImage);
+            setTempRect({
+                x: startPosInImage.x,
+                y: startPosInImage.y,
+                width: 0,
+                height: 0
+            });
+
+            return;
+        }
 
         // If we're clicking on a rectangle, prioritize selection over panning
         if (isClickOnRectangle(e)) {
@@ -315,8 +373,39 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         });
     };
 
-    // Handle mouse move for dragging
+    // Handle mouse move for dragging or drawing
     const handleMouseMove = (e) => {
+        if (drawingMode && tempRect) {
+            // We're drawing a new rectangle
+            const canvas = canvasRef.current;
+            if (!canvas) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const canvasX = e.clientX - rect.left;
+            const canvasY = e.clientY - rect.top;
+
+            // Convert to image coordinates
+            const imageX = canvasX / scale;
+            const imageY = canvasY / scale;
+
+            // Convert to original coordinates
+            const currentPosInImage = {
+                x: imageX / scaleFactorX,
+                y: imageY / scaleFactorY
+            };
+
+            setTempRect({
+                x: Math.min(drawStartPos.x, currentPosInImage.x),
+                y: Math.min(drawStartPos.y, currentPosInImage.y),
+                width: Math.abs(currentPosInImage.x - drawStartPos.x),
+                height: Math.abs(currentPosInImage.y - drawStartPos.y)
+            });
+
+            // Force redraw to show the temporary rectangle
+            requestAnimationFrame(drawCanvas);
+            return;
+        }
+
         if (!isDragging) return;
 
         // Check if we've moved significantly from the click start position
@@ -336,8 +425,33 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         });
     };
 
-    // Handle mouse up to end dragging
+    // Handle mouse up to end dragging or complete drawing
     const handleMouseUp = (e) => {
+        if (drawingMode && tempRect) {
+            // Finish drawing the rectangle if it has a reasonable size
+            if (tempRect.width > 10 && tempRect.height > 10) {
+                const newRect = {
+                    id: nextRectId,
+                    x: tempRect.x,
+                    y: tempRect.y,
+                    width: tempRect.width,
+                    height: tempRect.height,
+                    color: RECTANGLE_COLORS[(nextRectId - 1) % RECTANGLE_COLORS.length],
+                    label: `Text ${nextRectId}`,
+                    text: 'New text region',
+                    confidence: 1.0
+                };
+
+                setNextRectId(nextRectId + 1);
+                setRectangles(prevRects => [...prevRects, newRect]);
+                setSelectedRect(newRect);
+            }
+
+            setTempRect(null);
+            setDrawingMode(false);
+            return;
+        }
+
         if (isDragging && !hasMovedDuringClick) {
             // This was a click, not a drag - handle region selection
             handleCanvasClick(e);
@@ -445,6 +559,14 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         setSelectedRect(null);
     };
 
+    // Initialize nextRectId based on existing rectangles
+    useEffect(() => {
+        if (rectangles.length > 0) {
+            const maxId = Math.max(...rectangles.map(rect => rect.id));
+            setNextRectId(maxId + 1);
+        }
+    }, [rectangles]);
+
     useEffect(() => {
         const canvas = canvasRef.current;
         const image = imageRef.current;
@@ -512,6 +634,33 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                     <h3 className="font-medium">Image Viewer with Annotations</h3>
                     <div className="flex items-center space-x-4">
                         <button
+                            onClick={toggleDrawingMode}
+                            className={`px-3 py-1 rounded flex items-center gap-1 ${drawingMode ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-800 hover:bg-indigo-900'}`}
+                            title="Add new text region"
+                        >
+                            {drawingMode ? (
+                                <>
+                                    <Square className="w-4 h-4" />
+                                    <span>Drawing...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Plus className="w-4 h-4" />
+                                    <span>Add</span>
+                                </>
+                            )}
+                        </button>
+                        {selectedRect && (
+                            <button
+                                onClick={handleDeleteRect}
+                                className="px-3 py-1 bg-red-600 rounded hover:bg-red-700 flex items-center gap-1"
+                                title="Delete selected region"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                                <span>Delete</span>
+                            </button>
+                        )}
+                        <button
                             onClick={handleFitToScreen}
                             className="px-3 py-1 bg-indigo-800 rounded hover:bg-indigo-900 flex items-center gap-1"
                             title="Fit to screen"
@@ -556,12 +705,18 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                     {/* Canvas Container */}
                     <div
                         ref={containerRef}
-                        className="flex-1 p-1 bg-gray-800 overflow-hidden flex justify-center items-center cursor-grab"
+                        className={`flex-1 p-1 bg-gray-800 overflow-hidden flex justify-center items-center ${drawingMode ? 'cursor-crosshair' : 'cursor-grab'}`}
                         onMouseDown={handleMouseDown}
                         onMouseMove={handleMouseMove}
                         onMouseUp={handleMouseUp}
                         onMouseLeave={handleMouseUp}
                     >
+                        {drawingMode && (
+                            <div className="absolute top-4 left-4 bg-green-600 text-white text-sm px-3 py-1 rounded-md shadow-md flex items-center gap-1 animate-pulse">
+                                <Square className="w-4 h-4" />
+                                <span>Click and drag to create a new text region</span>
+                            </div>
+                        )}
                         <div
                             className="relative touch-none"
                             style={{
@@ -581,10 +736,9 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 style={{
                                     transform: `scale(${scale})`,
                                     transformOrigin: 'center',
-                                    cursor: isDragging && hasMovedDuringClick ? 'grabbing' : 'pointer'
+                                    cursor: isDragging && hasMovedDuringClick ? 'grabbing' : (drawingMode ? 'crosshair' : 'pointer')
                                 }}
                             />
-
                         </div>
                     </div>
 
@@ -633,15 +787,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 </div>
 
                                 <div className="border-t pt-2">
-                                    <div className="flex justify-between items-center">
-                                        <p className="font-medium text-sm text-gray-700 mb-1">Detected Text:</p>
-                                        <button
-                                            onClick={handleDeleteRect}
-                                            className="text-red-600 hover:text-red-800 text-sm px-2 py-1 rounded bg-red-50 hover:bg-red-100"
-                                        >
-                                            Delete
-                                        </button>
-                                    </div>
+                                    <p className="font-medium text-sm text-gray-700 mb-1">Detected Text:</p>
                                     <textarea
                                         value={selectedRect.text || selectedRect.info}
                                         onChange={handleTextEdit}
