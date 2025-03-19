@@ -53,14 +53,15 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
     const imageRef = useRef(null);
     const [scale, setScale] = useState(1);
     const [position, setPosition] = useState({ x: 0, y: 0 });
+    const [isDragging, setIsDragging] = useState(false);
+    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [selectedRect, setSelectedRect] = useState(null);
     const [pageWidth, setPageWidth] = useState(0);
     const [pageHeight, setPageHeight] = useState(0);
     const [scaleFactorX, setScaleFactorX] = useState(1);
     const [scaleFactorY, setScaleFactorY] = useState(1);
-
-    // Remove dragging-related state
-    const ARROW_KEY_MOVE_AMOUNT = 30; // Pixels to move with each arrow key press
+    const [clickStartPos, setClickStartPos] = useState({ x: 0, y: 0 });
+    const [hasMovedDuringClick, setHasMovedDuringClick] = useState(false);
 
     // Process JSON data to create rectangles
     const rectangles = useMemo(() => {
@@ -244,9 +245,10 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             const scaledWidth = image.width * fitScale;
             const scaledHeight = image.height * fitScale;
 
-            // Correct centering calculation
-            const newPosX = (containerWidth - scaledWidth) / 2;
+            // Center position calculation - ensure the image is truly centered
+            const newPosX = (containerWidth - scaledWidth) - (0.5 * containerWidth)
             const newPosY = (containerHeight - scaledHeight) / 2;
+
 
             setScale(fitScale);
             setPosition({ x: newPosX, y: newPosY });
@@ -254,6 +256,88 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             setScale(fitScale);
             setPosition({ x: 0, y: 0 });
         }
+    };
+
+    // First check if we're clicking on a rectangle before deciding it's a pan
+    const isClickOnRectangle = (e) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return false;
+
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = (e.clientX - rect.left - position.x) / scale;
+        const mouseY = (e.clientY - rect.top - position.y) / scale;
+
+        // Check if click is inside any rectangle
+        for (const rectangle of rectangles) {
+            const rectX = rectangle.x * scaleFactorX;
+            const rectY = rectangle.y * scaleFactorY;
+            const rectWidth = rectangle.width * scaleFactorX;
+            const rectHeight = rectangle.height * scaleFactorY;
+
+            if (
+                mouseX >= rectX &&
+                mouseX <= rectX + rectWidth &&
+                mouseY >= rectY &&
+                mouseY <= rectY + rectHeight
+            ) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Handle mouse down for dragging
+    const handleMouseDown = (e) => {
+        if (e.button !== 0) return; // Only handle left mouse button
+
+        const clickPos = { x: e.clientX, y: e.clientY };
+        setClickStartPos(clickPos);
+
+        // If we're clicking on a rectangle, prioritize selection over panning
+        if (isClickOnRectangle(e)) {
+            setHasMovedDuringClick(false);
+            handleCanvasClick(e);
+            return;
+        }
+
+        // Otherwise, prepare for panning
+        setHasMovedDuringClick(false);
+        setIsDragging(true);
+        setDragStart({
+            x: e.clientX - position.x,
+            y: e.clientY - position.y
+        });
+    };
+
+    // Handle mouse move for dragging
+    const handleMouseMove = (e) => {
+        if (!isDragging) return;
+
+        // Check if we've moved significantly from the click start position
+        const moveDistance = Math.sqrt(
+            Math.pow(e.clientX - clickStartPos.x, 2) +
+            Math.pow(e.clientY - clickStartPos.y, 2)
+        );
+
+        // If moved more than 5px, consider it a drag, not a click
+        if (moveDistance > 5) {
+            setHasMovedDuringClick(true);
+        }
+
+        setPosition({
+            x: e.clientX - dragStart.x,
+            y: e.clientY - dragStart.y
+        });
+    };
+
+    // Handle mouse up to end dragging
+    const handleMouseUp = (e) => {
+        if (isDragging && !hasMovedDuringClick) {
+            // This was a click, not a drag - handle region selection
+            handleCanvasClick(e);
+        }
+
+        setIsDragging(false);
     };
 
     // Handle canvas click to detect rectangle selections
@@ -299,7 +383,6 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         setSelectedRect(clickedRect);
     };
 
-
     // Handle zoom in/out
     const handleZoom = (zoomIn) => {
         setScale(prevScale => {
@@ -321,32 +404,14 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         e.preventDefault();
     };
 
-    // Handle keyboard navigation and shortcuts
+    // Handle keyboard shortcuts for zoom
     const handleKeyDown = (e) => {
         if (e.key === '+' || e.key === '=') {
             // Plus key pressed - zoom in
             handleZoom(true);
-            e.preventDefault();
         } else if (e.key === '-' || e.key === '_') {
             // Minus key pressed - zoom out
             handleZoom(false);
-            e.preventDefault();
-        } else if (e.key === 'ArrowUp') {
-            // Move image down (viewport up)
-            setPosition(prev => ({ ...prev, y: prev.y + ARROW_KEY_MOVE_AMOUNT }));
-            e.preventDefault();
-        } else if (e.key === 'ArrowDown') {
-            // Move image up (viewport down)
-            setPosition(prev => ({ ...prev, y: prev.y - ARROW_KEY_MOVE_AMOUNT }));
-            e.preventDefault();
-        } else if (e.key === 'ArrowLeft') {
-            // Move image right (viewport left)
-            setPosition(prev => ({ ...prev, x: prev.x + ARROW_KEY_MOVE_AMOUNT }));
-            e.preventDefault();
-        } else if (e.key === 'ArrowRight') {
-            // Move image left (viewport right)
-            setPosition(prev => ({ ...prev, x: prev.x - ARROW_KEY_MOVE_AMOUNT }));
-            e.preventDefault();
         }
     };
 
@@ -373,9 +438,9 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             const scaledWidth = image.width * fitScale;
             const scaledHeight = image.height * fitScale;
 
-            // Correct centering calculation
-            const newPosX = (containerWidth - scaledWidth) / 2;
-            const newPosY = (containerHeight - scaledHeight) / 2;
+            // Ensure image is properly centered with a minimum margin
+            const newPosX = Math.max((containerWidth - scaledWidth) / 2, 10);
+            const newPosY = Math.max((containerHeight - scaledHeight) / 2, 10);
 
             setPosition({
                 x: newPosX,
@@ -395,7 +460,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         // Add event listener for wheel events to prevent default behavior only
         container.addEventListener('wheel', handleWheel, { passive: false });
 
-        // Add keyboard event listener for zoom shortcuts and arrow navigation
+        // Add keyboard event listener for zoom shortcuts
         document.addEventListener('keydown', handleKeyDown);
 
         return () => {
@@ -408,7 +473,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
     // Redraw when selected rectangle, scale or scaling factors change
     useEffect(() => {
         drawCanvas();
-    }, [selectedRect, scale, scaleFactorX, scaleFactorY, position]);
+    }, [selectedRect, scale, scaleFactorX, scaleFactorY]);
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm p-2">
@@ -461,11 +526,14 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                     {/* Canvas Container */}
                     <div
                         ref={containerRef}
-                        className="flex-1 p-1 bg-gray-800 overflow-hidden flex justify-center items-center cursor-default"
-                        onClick={handleCanvasClick}
-                        tabIndex="0" // Make container focusable for keyboard navigation
+                        className="flex-1 p-1 bg-gray-800 overflow-hidden flex justify-center items-center cursor-grab"
+                        onMouseDown={handleMouseDown}
+                        onMouseMove={handleMouseMove}
+                        onMouseUp={handleMouseUp}
+                        onMouseLeave={handleMouseUp}
                     >
-                        <div className="relative touch-none"
+                        <div
+                            className="relative touch-none"
                             style={{
                                 transform: `translate(${position.x}px, ${position.y}px)`,
                             }}
@@ -483,9 +551,10 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 style={{
                                     transform: `scale(${scale})`,
                                     transformOrigin: 'center',
-                                    cursor: 'pointer'
+                                    cursor: isDragging && hasMovedDuringClick ? 'grabbing' : 'pointer'
                                 }}
                             />
+
                         </div>
                     </div>
 
@@ -506,13 +575,6 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 <p>Using demo annotations. Upload a matching JSON file to see actual text regions.</p>
                             </div>
                         )}
-
-                        <div className="mb-4 bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-700">
-                            <p className="font-medium">Navigation</p>
-                            <p className="text-xs mt-1">
-                                Use arrow keys to navigate around the image
-                            </p>
-                        </div>
 
                         {selectedRect ? (
                             <div className="bg-white p-4 rounded-lg shadow-md">
