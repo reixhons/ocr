@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize, Trash2, Plus, Square, Save, Download } from 'lucide-react';
+import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize, Trash2, Plus, Square, Save, Download, Settings, Sliders, PaintBucket, Type, Brush, Eye, EyeOff, Check } from 'lucide-react';
 
 // Fallback demo rectangles if no JSON data is provided
 const demoRectangles = [
@@ -15,16 +15,6 @@ const demoRectangles = [
     },
     {
         id: 2,
-        x: 200,
-        y: 150,
-        width: 150,
-        height: 100,
-        color: 'rgba(0, 255, 0, 0.2)',
-        label: 'Region 2',
-        info: 'Another important section of the document.'
-    },
-    {
-        id: 3,
         x: 100,
         y: 300,
         width: 200,
@@ -50,7 +40,7 @@ const RECTANGLE_COLORS = [
 // Constants for the application
 const MIN_RECT_SIZE = 5; // Minimum size for rectangles in original coordinates
 
-function ImageViewer({ imageUrl, imageData, onClose }) {
+function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
     const imageRef = useRef(null);
@@ -70,14 +60,68 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
     const [drawStartPos, setDrawStartPos] = useState({ x: 0, y: 0 });
     const [tempRect, setTempRect] = useState(null);
     const [nextRectId, setNextRectId] = useState(1);
+    const [styleSettingsOpen, setStyleSettingsOpen] = useState(false);
+    const initialStyleSettings = {
+        fillOpacity: 0.2,
+        strokeWidth: 2,
+        labelBgOpacity: 0.8,
+        fontSize: 14,
+        fontColor: "#ffffff",
+        showLabels: true,
+        colors: ["rgba(255, 0, 0, 0.2)", "rgba(0, 0, 255, 0.2)"]
+    };
+    const [styleSettings, setStyleSettings] = useState(initialStyleSettings);
+    const [pendingColor, setPendingColor] = useState(null);
+    const previewRectRef = useRef(null);
 
     // Process JSON data to create rectangles
     const processJsonData = useMemo(() => {
         if (!imageData?.jsonData) return demoRectangles;
 
         try {
-            // Check if the data is in the expected format
-            if (Array.isArray(imageData.jsonData)) {
+            // Check if the data is in the NEW expected format with image_width, image_height, and ocr_results
+            if (imageData.jsonData.ocr_results && Array.isArray(imageData.jsonData.ocr_results)) {
+                // Extract image dimensions if available
+                if (imageData.jsonData.image_width && imageData.jsonData.image_height) {
+                    setPageWidth(imageData.jsonData.image_width);
+                    setPageHeight(imageData.jsonData.image_height);
+                }
+
+                // Map the ocr_results to our rectangle format
+                return imageData.jsonData.ocr_results.map((item, index) => {
+                    // Calculate rectangle coordinates from vertices
+                    const vertices = item.vertices || [];
+                    if (vertices.length !== 4) {
+                        return null;
+                    }
+
+                    // Calculate bounding box for label positioning and selection
+                    const xs = vertices.map(v => v[0]);
+                    const ys = vertices.map(v => v[1]);
+                    const minX = Math.min(...xs);
+                    const minY = Math.min(...ys);
+                    const maxX = Math.max(...xs);
+                    const maxY = Math.max(...ys);
+
+                    return {
+                        id: index + 1,
+                        x: minX,
+                        y: minY,
+                        width: maxX - minX,
+                        height: maxY - minY,
+                        color: RECTANGLE_COLORS[index % RECTANGLE_COLORS.length],
+                        label: `Text ${index + 1}`,
+                        text: item.text || 'No text available',
+                        confidence: item.confidence || 'N/A',
+                        vertices: vertices,
+                        isQuad: true // Flag to identify shapes from JSON with vertices
+                    };
+                }).filter(Boolean); // Remove any null values
+            }
+
+            // LEGACY FORMAT SUPPORT - for backward compatibility
+            // Check if the data is in the old array format (multiple pages)
+            else if (Array.isArray(imageData.jsonData)) {
                 // Handle array format (multiple pages)
                 const firstPage = imageData.jsonData[0];
                 if (firstPage && firstPage.results && Array.isArray(firstPage.results)) {
@@ -118,7 +162,9 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                         };
                     }).filter(Boolean); // Remove any null values
                 }
-            } else if (imageData.jsonData.results && Array.isArray(imageData.jsonData.results)) {
+            }
+            // LEGACY FORMAT SUPPORT - for backward compatibility
+            else if (imageData.jsonData.results && Array.isArray(imageData.jsonData.results)) {
                 // Handle single page format
                 if (imageData.jsonData.page_width && imageData.jsonData.page_heigth) {
                     setPageWidth(imageData.jsonData.page_width);
@@ -176,6 +222,84 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         }
     }, [pageWidth, pageHeight, imageData]);
 
+    // Draw a preview rectangle for style settings
+    const drawPreviewRect = () => {
+        const canvas = previewRectRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw background grid to show transparency
+        const gridSize = 10;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#EEEEEE';
+        for (let x = 0; x < canvas.width; x += gridSize * 2) {
+            for (let y = 0; y < canvas.height; y += gridSize * 2) {
+                ctx.fillRect(x, y, gridSize, gridSize);
+                ctx.fillRect(x + gridSize, y + gridSize, gridSize, gridSize);
+            }
+        }
+
+        // Set up drawing styles based on current settings
+        const demoColor = styleSettings.colors[0] || 'rgba(255, 0, 0, 0.2)';
+
+        // Draw demo rectangle
+        ctx.fillStyle = demoColor.replace(/[\d.]+\)$/, `${styleSettings.fillOpacity})`);
+        // Set stroke color to match fill color but with 1.0 opacity
+        ctx.strokeStyle = demoColor.replace(/[\d.]+\)$/, '1.0)');
+        ctx.lineWidth = styleSettings.strokeWidth;
+
+        // Rectangle dimensions
+        const rectX = 20;
+        const rectY = 40;
+        const rectWidth = canvas.width - 40;
+        const rectHeight = canvas.height - 70;
+
+        ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
+        ctx.strokeRect(rectX, rectY, rectWidth, rectHeight);
+
+        // Draw label if enabled
+        if (styleSettings.showLabels) {
+            const labelText = "Sample Text";
+
+            ctx.font = `${styleSettings.fontBold ? 'bold' : 'normal'} ${styleSettings.fontSize}px Arial`;
+            const textMetrics = ctx.measureText(labelText);
+            const textWidth = textMetrics.width;
+
+            // Draw label background
+            const labelY = rectY - 20;
+            const labelBgColor = demoColor.replace(/[\d.]+\)$/, `${styleSettings.labelBgOpacity})`);
+            ctx.fillStyle = labelBgColor;
+            ctx.fillRect(rectX, labelY, textWidth + 10, 20);
+
+            // Add shadow
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 2;
+            ctx.shadowOffsetX = 1;
+            ctx.shadowOffsetY = 1;
+
+            // Draw label text
+            ctx.fillStyle = styleSettings.fontColor;
+            ctx.fillText(labelText, rectX + 5, labelY + 14);
+
+            // Reset shadow
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+        }
+    };
+
+    // Update preview when style settings change
+    useEffect(() => {
+        if (styleSettingsOpen && previewRectRef.current) {
+            drawPreviewRect();
+        }
+    }, [styleSettings, styleSettingsOpen]);
+
     // Draw everything (image + rectangles)
     const drawCanvas = () => {
         const canvas = canvasRef.current;
@@ -195,13 +319,14 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         rectangles.forEach(rect => {
             // Use a different style for the selected rectangle
             if (selectedRect && selectedRect.id === rect.id) {
-                ctx.fillStyle = rect.color.replace('0.2', '0.4');
+                ctx.fillStyle = rect.color.replace(/[\d.]+\)$/, `${styleSettings.fillOpacity * 2})`);
                 ctx.strokeStyle = '#FFFF00';
-                ctx.lineWidth = 3;
+                ctx.lineWidth = styleSettings.strokeWidth + 1;
             } else {
-                ctx.fillStyle = rect.color.replace('0.2', '0.05');
-                ctx.strokeStyle = rect.color.replace('0.2', '0.8');
-                ctx.lineWidth = 4;
+                ctx.fillStyle = rect.color.replace(/[\d.]+\)$/, `${styleSettings.fillOpacity})`);
+                // Set stroke color to match fill color but with 1.0 opacity
+                ctx.strokeStyle = rect.color.replace(/[\d.]+\)$/, '1.0)');
+                ctx.lineWidth = styleSettings.strokeWidth;
             }
 
             // Apply scaling factors for JSON-based coordinates
@@ -232,50 +357,58 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                 ctx.strokeRect(x, y, width, height);
             }
 
-            // Get coordinates for label positioning
-            const x = rect.x * scaleFactorX;
-            const y = rect.y * scaleFactorY;
+            // Only draw labels if the setting is enabled
+            if (styleSettings.showLabels) {
+                // Get coordinates for label positioning
+                const x = rect.x * scaleFactorX;
+                const y = rect.y * scaleFactorY;
 
-            // Add a better label above each rectangle with text content
-            // Create label background
-            const labelText = rect.text || rect.info || '';
-            const truncatedText = labelText.length > 25 ? labelText.substring(0, 25) + '...' : labelText;
+                // Add a better label above each rectangle with text content
+                // Create label background
+                const labelText = rect.text || rect.info || '';
+                const truncatedText = labelText.length > 25 ? labelText.substring(0, 25) + '...' : labelText;
 
-            ctx.font = '12px Arial';
-            const textMetrics = ctx.measureText(truncatedText);
-            const textWidth = textMetrics.width;
+                ctx.font = `${styleSettings.fontBold ? 'bold' : 'normal'} ${styleSettings.fontSize}px Arial`;
+                const textMetrics = ctx.measureText(truncatedText);
+                const textWidth = textMetrics.width;
 
-            // Determine if label should be above or inside the rectangle (if near top of image)
-            const labelY = y < 25 ? y + 5 : y - 20;
+                // Determine if label should be above or inside the rectangle (if near top of image)
+                const labelY = y < 25 ? y + 5 : y - 20;
 
-            // Draw label background
-            const labelBgColor = rect.color.replace('0.2', '0.8');
-            ctx.fillStyle = labelBgColor;
-            ctx.fillRect(x, labelY, textWidth + 10, 20);
+                // Draw label background
+                const labelBgColor = rect.color.replace(/[\d.]+\)$/, `${styleSettings.labelBgOpacity})`);
+                ctx.fillStyle = labelBgColor;
+                ctx.fillRect(x, labelY, textWidth + 10, 20);
 
-            // Add a subtle shadow to the text for better visibility
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-            ctx.shadowBlur = 2;
-            ctx.shadowOffsetX = 1;
-            ctx.shadowOffsetY = 1;
+                // Add a subtle shadow to the text for better visibility
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+                ctx.shadowBlur = 2;
+                ctx.shadowOffsetX = 1;
+                ctx.shadowOffsetY = 1;
 
-            // Draw label text
-            ctx.fillStyle = 'white';
-            ctx.font = 'bold 12px Arial';
-            ctx.fillText(truncatedText, x + 5, labelY + 14);
+                // Draw label text with the configured font color
+                ctx.fillStyle = styleSettings.fontColor;
+                ctx.font = `${styleSettings.fontBold ? 'bold' : 'normal'} ${styleSettings.fontSize}px Arial`;
+                ctx.fillText(truncatedText, x + 5, labelY + 14);
 
-            // Reset shadow for other drawing operations
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 0;
+                // Reset shadow for other drawing operations
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+            }
         });
 
         // Draw temporary rectangle during drawing
         if (drawingMode && tempRect) {
             // Use a different color if the rectangle is too small
-            ctx.fillStyle = tempRect.isTooSmall ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 100, 255, 0.3)';
-            ctx.strokeStyle = tempRect.isTooSmall ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 100, 255, 0.8)';
+            if (tempRect.isTooSmall) {
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.3)';
+                ctx.strokeStyle = 'rgba(255, 0, 0, 1.0)';
+            } else {
+                ctx.fillStyle = 'rgba(0, 100, 255, 0.3)';
+                ctx.strokeStyle = 'rgba(0, 100, 255, 1.0)';
+            }
             ctx.lineWidth = 2;
 
             const x = tempRect.x * scaleFactorX;
@@ -704,21 +837,17 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         }
     }, [rectangles]);
 
-    // Function to prepare data for export in the same format as input
+    // Function to prepare data for export in the new format
     const prepareExportData = () => {
-        // Default structure for the export data
+        // New JSON structure
         const exportData = {
-            results: []
+            image_width: pageWidth || (imageData?.width || 0),
+            image_height: pageHeight || (imageData?.height || 0),
+            ocr_results: []
         };
 
-        // If we have the original page dimensions, include them
-        if (pageWidth && pageHeight) {
-            exportData.page_width = pageWidth;
-            exportData.page_heigth = pageHeight; // Maintaining same property name as input
-        }
-
         // Convert our rectangles to the expected output format
-        exportData.results = rectangles.map(rect => {
+        exportData.ocr_results = rectangles.map(rect => {
             const result = {
                 text: rect.text || '',
                 confidence: rect.confidence || 1.0
@@ -746,8 +875,11 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
 
     // Handle export to JSON file
     const handleExport = () => {
-        // Prepare the data in the same format as input
+        // Prepare the data in the new format
         const exportData = prepareExportData();
+
+        // Log the export data structure for verification
+        console.log('Exporting data structure:', exportData);
 
         // Convert to JSON string with nice formatting
         const jsonString = JSON.stringify(exportData, null, 2);
@@ -762,9 +894,20 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         const a = document.createElement('a');
         a.href = url;
 
-        // Set the filename using the current date/time for uniqueness
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        a.download = `ocr-export-${timestamp}.json`;
+        // Use the original image filename with .json extension
+        let filename = 'ocr-export.json';
+
+        if (imageName) {
+            // Use the imageName that was passed from the parent component (from HomeTwo)
+            // This preserves the original filename (like file-1.tif) but changes extension to .json
+            console.log('Using original filename:', imageName);
+            filename = imageName.replace(/\.[^/.]+$/, '.json');
+        }
+
+        // Log the final filename for verification
+        console.log('Exporting to:', filename);
+
+        a.download = filename;
 
         // Append the anchor to the document, click it, and remove it
         document.body.appendChild(a);
@@ -773,6 +916,65 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
 
         // Release the Blob URL to free up resources
         URL.revokeObjectURL(url);
+    };
+
+    // Apply current style settings to all rectangles in order
+    const applyColorsToRectangles = () => {
+        if (rectangles.length === 0 || styleSettings.colors.length === 0) return;
+
+        const updatedRectangles = rectangles.map((rect, index) => {
+            // Assign colors in sequence, cycling through the available colors
+            const colorIndex = index % styleSettings.colors.length;
+            return {
+                ...rect,
+                color: styleSettings.colors[colorIndex]
+            };
+        });
+
+        setRectangles(updatedRectangles);
+    };
+
+    // Remove color from palette
+    const removeColor = (indexToRemove) => {
+        if (styleSettings.colors.length <= 1) {
+            // Don't remove the last color
+            return;
+        }
+
+        setStyleSettings(prev => ({
+            ...prev,
+            colors: prev.colors.filter((_, index) => index !== indexToRemove)
+        }));
+    };
+
+    // Toggle style settings panel
+    const toggleStyleSettings = (shouldApply = false) => {
+        if (!styleSettingsOpen) {
+            // Opening the panel - nothing special needed
+            setStyleSettingsOpen(true);
+        } else {
+            // Closing the panel
+            if (shouldApply === true) {
+                // Apply button was clicked - apply colors to rectangles
+                applyColorsToRectangles();
+                setStyleSettingsOpen(false);
+            } else if (shouldApply === false) {
+                // Reset button was clicked - reset to initial values
+                setStyleSettings(initialStyleSettings);
+                // Keep the panel open to show the reset values
+            } else {
+                // X button was clicked - just close without applying
+                setStyleSettingsOpen(false);
+            }
+        }
+    };
+
+    // Handle style settings changes
+    const handleStyleChange = (property, value) => {
+        setStyleSettings(prev => ({
+            ...prev,
+            [property]: value
+        }));
     };
 
     useEffect(() => {
@@ -839,7 +1041,17 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm p-2">
             <div className="relative w-full h-full bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col">
                 <div className="bg-indigo-700 text-white p-4 flex justify-between items-center">
-                    <h3 className="font-medium">Image Viewer with Annotations</h3>
+                    <div className="flex items-center gap-4">
+                        <h3 className="font-medium">Image Viewer with Annotations</h3>
+                        <button
+                            onClick={toggleStyleSettings}
+                            className="px-3 py-1 bg-indigo-800 rounded hover:bg-indigo-900 flex items-center gap-1"
+                            title="Style Settings"
+                        >
+                            <Settings className="w-4 h-4" />
+                            <span>Style</span>
+                        </button>
+                    </div>
                     <div className="flex items-center space-x-4">
                         <button
                             onClick={toggleDrawingMode}
@@ -910,6 +1122,260 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                 </div>
 
                 <div className="flex flex-1 overflow-hidden relative">
+                    {/* Style Settings Panel as a popup dialog */}
+                    {styleSettingsOpen && (
+                        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-30">
+                            <div className="bg-white rounded-lg shadow-2xl w-[500px] max-h-[90vh] overflow-hidden flex flex-col">
+                                <div className="bg-indigo-700 text-white p-3 flex justify-between items-center">
+                                    <h3 className="font-semibold">Style Settings</h3>
+                                    <button
+                                        onClick={() => toggleStyleSettings(null)}
+                                        className="text-white hover:text-gray-200"
+                                    >
+                                        <X className="w-5 h-5" />
+                                    </button>
+                                </div>
+
+                                <div className="flex flex-1 overflow-hidden">
+                                    {/* Settings Controls */}
+                                    <div className="w-[60%] p-4 overflow-y-auto border-r">
+                                        <div className="space-y-5">
+                                            {/* Fill Settings */}
+                                            <div className="space-y-2">
+                                                <h4 className="font-medium text-gray-800 flex items-center gap-1">
+                                                    <PaintBucket className="w-4 h-4" />
+                                                    Fill Settings
+                                                </h4>
+                                                <div className="flex items-center">
+                                                    <span className="text-sm text-gray-600 w-20">Opacity:</span>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max="1"
+                                                        step="0.05"
+                                                        value={styleSettings.fillOpacity}
+                                                        onChange={(e) => handleStyleChange('fillOpacity', parseFloat(e.target.value))}
+                                                        className="flex-1 mx-2"
+                                                    />
+                                                    <span className="text-xs w-10 text-gray-600">{Math.round(styleSettings.fillOpacity * 100)}%</span>
+                                                </div>
+                                            </div>
+
+                                            {/* Stroke Settings */}
+                                            <div className="space-y-2">
+                                                <h4 className="font-medium text-gray-800 flex items-center gap-1">
+                                                    <Brush className="w-4 h-4" />
+                                                    Stroke Settings
+                                                </h4>
+                                                <div className="flex items-center">
+                                                    <span className="text-sm text-gray-600 w-20">Width:</span>
+                                                    <input
+                                                        type="range"
+                                                        min="1"
+                                                        max="10"
+                                                        step="1"
+                                                        value={styleSettings.strokeWidth}
+                                                        onChange={(e) => handleStyleChange('strokeWidth', parseInt(e.target.value))}
+                                                        className="flex-1 mx-2"
+                                                    />
+                                                    <span className="text-xs w-10 text-gray-600">{styleSettings.strokeWidth}px</span>
+                                                </div>
+                                                <div className="text-xs text-gray-500 ml-20">Border color uses the same color with 100% opacity</div>
+                                            </div>
+
+                                            {/* Label Settings */}
+                                            <div className="space-y-2">
+                                                <h4 className="font-medium text-gray-800 flex items-center gap-1">
+                                                    <Type className="w-4 h-4" />
+                                                    Label Settings
+                                                </h4>
+                                                <div className="flex items-center">
+                                                    <span className="text-sm text-gray-600 w-20">Show Labels:</span>
+                                                    <label className="flex items-center cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={styleSettings.showLabels}
+                                                            onChange={(e) => handleStyleChange('showLabels', e.target.checked)}
+                                                            className="mr-2"
+                                                        />
+                                                        <span className="text-sm">{styleSettings.showLabels ? <Eye className="w-4 h-4 inline" /> : <EyeOff className="w-4 h-4 inline" />}</span>
+                                                    </label>
+                                                </div>
+
+                                                {styleSettings.showLabels && (
+                                                    <>
+                                                        <div className="flex items-center">
+                                                            <span className="text-sm text-gray-600 w-20">BG Opacity:</span>
+                                                            <input
+                                                                type="range"
+                                                                min="0"
+                                                                max="1"
+                                                                step="0.05"
+                                                                value={styleSettings.labelBgOpacity}
+                                                                onChange={(e) => handleStyleChange('labelBgOpacity', parseFloat(e.target.value))}
+                                                                className="flex-1 mx-2"
+                                                            />
+                                                            <span className="text-xs w-10 text-gray-600">{Math.round(styleSettings.labelBgOpacity * 100)}%</span>
+                                                        </div>
+                                                        <div className="flex items-center">
+                                                            <span className="text-sm text-gray-600 w-20">Font Size:</span>
+                                                            <input
+                                                                type="range"
+                                                                min="8"
+                                                                max="20"
+                                                                step="1"
+                                                                value={styleSettings.fontSize}
+                                                                onChange={(e) => handleStyleChange('fontSize', parseInt(e.target.value))}
+                                                                className="flex-1 mx-2"
+                                                            />
+                                                            <span className="text-xs w-10 text-gray-600">{styleSettings.fontSize}px</span>
+                                                        </div>
+                                                        <div className="flex items-center">
+                                                            <span className="text-sm text-gray-600 w-20">Bold:</span>
+                                                            <label className="flex items-center cursor-pointer">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={styleSettings.fontBold}
+                                                                    onChange={(e) => handleStyleChange('fontBold', e.target.checked)}
+                                                                    className="mr-2"
+                                                                />
+                                                                <span className={`text-sm ${styleSettings.fontBold ? 'font-bold' : 'font-normal'}`}>Text Style</span>
+                                                            </label>
+                                                        </div>
+                                                        <div className="flex items-center">
+                                                            <span className="text-sm text-gray-600 w-20">Font Color:</span>
+                                                            <div className="flex items-center">
+                                                                <div
+                                                                    className="w-6 h-6 rounded border border-gray-300 mr-2"
+                                                                    style={{ backgroundColor: styleSettings.fontColor }}
+                                                                ></div>
+                                                                <input
+                                                                    type="color"
+                                                                    value={styleSettings.fontColor}
+                                                                    onChange={(e) => handleStyleChange('fontColor', e.target.value)}
+                                                                    className="w-16"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            {/* Color Palette */}
+                                            <div className="space-y-2">
+                                                <h4 className="font-medium text-gray-800">Color Palette</h4>
+                                                <p className="text-xs text-gray-500 mb-2">Colors will be applied to all regions in sequence when you click "Apply & Close"</p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {styleSettings.colors.map((color, index) => {
+                                                        // Extract RGB values
+                                                        const rgbMatch = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                                                        if (!rgbMatch) return null;
+
+                                                        const [_, r, g, b] = rgbMatch;
+                                                        const hexColor = `#${parseInt(r).toString(16).padStart(2, '0')}${parseInt(g).toString(16).padStart(2, '0')}${parseInt(b).toString(16).padStart(2, '0')}`;
+
+                                                        return (
+                                                            <div
+                                                                key={index}
+                                                                className="w-8 h-8 rounded border border-gray-300 cursor-pointer flex items-center justify-center relative group"
+                                                                style={{ backgroundColor: hexColor }}
+                                                                title={`Color ${index + 1}`}
+                                                            >
+                                                                <div
+                                                                    className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        removeColor(index);
+                                                                    }}
+                                                                    title="Remove color"
+                                                                >
+                                                                    <span className="text-white text-xs font-bold">-</span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+
+                                                    {/* Add new color UI */}
+                                                    <div className="space-y-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <div
+                                                                className="w-8 h-8 rounded border border-gray-300 flex items-center justify-center overflow-hidden"
+                                                                style={{ backgroundColor: pendingColor || '#FF5733' }}
+                                                            >
+                                                                <input
+                                                                    type="color"
+                                                                    value={pendingColor || '#FF5733'}
+                                                                    onChange={(e) => setPendingColor(e.target.value)}
+                                                                    className="opacity-0 absolute w-8 h-8 cursor-pointer"
+                                                                />
+                                                            </div>
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (pendingColor) {
+                                                                        // Convert hex to rgba
+                                                                        const r = parseInt(pendingColor.slice(1, 3), 16);
+                                                                        const g = parseInt(pendingColor.slice(3, 5), 16);
+                                                                        const b = parseInt(pendingColor.slice(5, 7), 16);
+                                                                        const newColor = `rgba(${r}, ${g}, ${b}, ${styleSettings.fillOpacity})`;
+
+                                                                        setStyleSettings(prev => ({
+                                                                            ...prev,
+                                                                            colors: [...prev.colors, newColor]
+                                                                        }));
+
+                                                                        setPendingColor(null);
+                                                                    }
+                                                                }}
+                                                                className="px-2 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700"
+                                                                disabled={!pendingColor}
+                                                            >
+                                                                Save Color
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Preview */}
+                                    <div className="w-[40%] p-4 bg-gray-50 overflow-hidden flex flex-col">
+                                        <h4 className="font-medium text-gray-700 mb-2">Preview</h4>
+                                        <div className="flex-1 flex items-center justify-center">
+                                            <canvas
+                                                ref={previewRectRef}
+                                                width={200}
+                                                height={200}
+                                                className="border border-gray-200 rounded"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="border-t p-3 flex justify-end bg-gray-50">
+                                    <button
+                                        onClick={() => toggleStyleSettings(false)}
+                                        className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600 mr-2"
+                                    >
+                                        Reset
+                                    </button>
+                                    <button
+                                        onClick={() => toggleStyleSettings(null)}
+                                        className="px-4 py-2 border border-gray-300 text-gray-700 rounded hover:bg-gray-100 mr-2"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={() => toggleStyleSettings(true)}
+                                        className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                                    >
+                                        Apply & Close
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Canvas Container */}
                     <div
                         ref={containerRef}

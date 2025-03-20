@@ -6,6 +6,7 @@ import ImageViewer from '../components/ImageViewer';
 function HomeTwo() {
     const [images, setImages] = useState([]);
     const [selectedImage, setSelectedImage] = useState(null);
+    const [selectedImageName, setSelectedImageName] = useState(null);
     const [selectedImageData, setSelectedImageData] = useState(null);
     const fileInputRef = useRef(null);
     const jsonFileInputRef = useRef(null);
@@ -193,6 +194,7 @@ function HomeTwo() {
         if (selectedImage === images[index].url) {
             setSelectedImage(null);
             setSelectedImageData(null);
+            setSelectedImageName(null);
         }
     };
 
@@ -266,6 +268,7 @@ function HomeTwo() {
 
     const handleImageClick = (image) => {
         setSelectedImage(image.url);
+        setSelectedImageName(image.file.name)
         setSelectedImageData({
             width: image.width,
             height: image.height,
@@ -376,10 +379,12 @@ function HomeTwo() {
                 {selectedImage && (
                     <ImageViewer
                         imageUrl={selectedImage}
+                        imageName={selectedImageName}
                         imageData={selectedImageData}
                         onClose={() => {
                             setSelectedImage(null);
                             setSelectedImageData(null);
+                            setSelectedImageName(null)
                         }}
                     />
                 )}
