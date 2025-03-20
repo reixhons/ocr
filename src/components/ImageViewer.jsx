@@ -65,7 +65,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
         fillOpacity: 0.2,
         strokeWidth: 2,
         labelBgOpacity: 0.8,
-        fontSize: 14,
+        fontSize: 16,
         fontColor: "#ffffff",
         showLabels: true,
         colors: ["rgba(255, 0, 0, 0.2)", "rgba(0, 0, 255, 0.2)"]
@@ -788,10 +788,28 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
         setScale(zoomValue);
     };
 
-    // Handle mouse wheel for zooming - disabled as requested
+    // Add this new wheel handler function
     const handleWheel = (e) => {
-        // Only prevent default to avoid page scrolling, but don't zoom
         e.preventDefault();
+
+        // Use percentage-based scaling (4% per scroll event)
+        const zoomFactor = e.deltaY < 0 ? 1.06 : 0.94; // 4% zoom in or out
+        const newScale = Math.max(0.1, Math.min(10, scale * zoomFactor)); // Limit scale between 0.1 and 10
+
+        if (newScale !== scale) {
+            // Calculate mouse position relative to canvas
+            const rect = containerRef.current.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Calculate new position that keeps the point under mouse in same relative position
+            const scaleChange = newScale / scale;
+            const newX = mouseX - (mouseX - position.x) * scaleChange;
+            const newY = mouseY - (mouseY - position.y) * scaleChange;
+
+            setScale(newScale);
+            setPosition({ x: newX, y: newY });
+        }
     };
 
     // Handle keyboard shortcuts for zoom
@@ -1124,7 +1142,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                 <div className="flex flex-1 overflow-hidden relative">
                     {/* Style Settings Panel as a popup dialog */}
                     {styleSettingsOpen && (
-                        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-30">
+                        <div className="fixed inset-0 bg-black/50 bg-opacity-30 flex items-center justify-center z-30">
                             <div className="bg-white rounded-lg shadow-2xl w-[500px] max-h-[90vh] overflow-hidden flex flex-col">
                                 <div className="bg-indigo-700 text-white p-3 flex justify-between items-center">
                                     <h3 className="font-semibold">Style Settings</h3>
@@ -1384,6 +1402,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                         onMouseMove={handleMouseMove}
                         onMouseUp={handleMouseUp}
                         onMouseLeave={handleMouseUp}
+                        onWheel={handleWheel}
                     >
                         {drawingMode && (
                             <div className="absolute top-4 left-4 bg-green-600 text-white text-sm px-3 py-1 rounded-md shadow-md flex items-center gap-1 animate-pulse">
