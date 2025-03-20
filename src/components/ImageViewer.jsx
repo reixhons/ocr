@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize, Trash2, Plus, Square } from 'lucide-react';
+import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize, Trash2, Plus, Square, Save, Download } from 'lucide-react';
 
 // Fallback demo rectangles if no JSON data is provided
 const demoRectangles = [
@@ -9,7 +9,7 @@ const demoRectangles = [
         y: 50,
         width: 100,
         height: 80,
-        color: 'rgba(255, 0, 0, 0.4)',
+        color: 'rgba(255, 0, 0, 0.2)',
         label: 'Region 1',
         info: 'This is a sample annotation area containing text.'
     },
@@ -19,7 +19,7 @@ const demoRectangles = [
         y: 150,
         width: 150,
         height: 100,
-        color: 'rgba(0, 255, 0, 0.4)',
+        color: 'rgba(0, 255, 0, 0.2)',
         label: 'Region 2',
         info: 'Another important section of the document.'
     },
@@ -29,7 +29,7 @@ const demoRectangles = [
         y: 300,
         width: 200,
         height: 120,
-        color: 'rgba(0, 0, 255, 0.4)',
+        color: 'rgba(0, 0, 255, 0.2)',
         label: 'Region 3',
         info: 'This contains key information that needs attention.'
     },
@@ -37,15 +37,18 @@ const demoRectangles = [
 
 // These colors will be used for JSON-based rectangles
 const RECTANGLE_COLORS = [
-    'rgba(255, 0, 0, 0.4)',   // Red
-    'rgba(0, 255, 0, 0.4)',   // Green
-    'rgba(0, 0, 255, 0.4)',   // Blue
-    'rgba(255, 165, 0, 0.4)', // Orange
-    'rgba(128, 0, 128, 0.4)', // Purple
-    'rgba(255, 192, 203, 0.4)', // Pink
-    'rgba(0, 128, 128, 0.4)', // Teal
-    'rgba(255, 255, 0, 0.4)', // Yellow
+    'rgba(255, 0, 0, 0.2)',   // Red
+    // 'rgba(0, 200, 0, 0.2)',   // Green
+    'rgba(0, 0, 255, 0.2)',   // Blue
+    // 'rgba(255, 140, 0, 0.2)', // Orange
+    // 'rgba(128, 0, 128, 0.2)', // Purple
+    // 'rgba(255, 120, 213, 0.2)', // Pink
+    // 'rgba(0, 128, 128, 0.2)', // Teal
+    // 'rgba(255, 205, 0, 0.2)', // Yellow
 ];
+
+// Constants for the application
+const MIN_RECT_SIZE = 5; // Minimum size for rectangles in original coordinates
 
 function ImageViewer({ imageUrl, imageData, onClose }) {
     const canvasRef = useRef(null);
@@ -92,7 +95,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                             return null;
                         }
 
-                        // Calculate bounding box
+                        // Calculate bounding box for label positioning and selection
                         const xs = vertices.map(v => v[0]);
                         const ys = vertices.map(v => v[1]);
                         const minX = Math.min(...xs);
@@ -110,15 +113,16 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                             label: `Text ${index + 1}`,
                             text: item.text || 'No text available',
                             confidence: item.confidence || 'N/A',
-                            vertices: item.vertices || []
+                            vertices: vertices,
+                            isQuad: true // Flag to identify shapes from JSON with vertices
                         };
                     }).filter(Boolean); // Remove any null values
                 }
             } else if (imageData.jsonData.results && Array.isArray(imageData.jsonData.results)) {
                 // Handle single page format
                 if (imageData.jsonData.page_width && imageData.jsonData.page_heigth) {
-                    setPageWidth(imageData.jsonData[0].page_width);
-                    setPageHeight(imageData.jsonData[0].page_heigth);
+                    setPageWidth(imageData.jsonData.page_width);
+                    setPageHeight(imageData.jsonData.page_heigth);
                 }
 
                 return imageData.jsonData.results.map((item, index) => {
@@ -128,7 +132,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                         return null;
                     }
 
-                    // Calculate bounding box
+                    // Calculate bounding box for label positioning and selection
                     const xs = vertices.map(v => v[0]);
                     const ys = vertices.map(v => v[1]);
                     const minX = Math.min(...xs);
@@ -146,7 +150,8 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                         label: `Text ${index + 1}`,
                         text: item.text || 'No text available',
                         confidence: item.confidence || 'N/A',
-                        vertices: item.vertices || []
+                        vertices: vertices,
+                        isQuad: true // Flag to identify shapes from JSON with vertices
                     };
                 }).filter(Boolean);
             }
@@ -190,37 +195,87 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         rectangles.forEach(rect => {
             // Use a different style for the selected rectangle
             if (selectedRect && selectedRect.id === rect.id) {
-                ctx.fillStyle = rect.color.replace('0.4', '0.6');
+                ctx.fillStyle = rect.color.replace('0.2', '0.4');
                 ctx.strokeStyle = '#FFFF00';
                 ctx.lineWidth = 3;
             } else {
-                ctx.fillStyle = rect.color;
-                ctx.strokeStyle = rect.color.replace('0.4', '0.8');
-                ctx.lineWidth = 2;
+                ctx.fillStyle = rect.color.replace('0.2', '0.05');
+                ctx.strokeStyle = rect.color.replace('0.2', '0.8');
+                ctx.lineWidth = 4;
             }
 
             // Apply scaling factors for JSON-based coordinates
+            if (rect.isQuad && rect.vertices && rect.vertices.length === 4) {
+                // Draw as quadrilateral using the vertices
+                const scaledVertices = rect.vertices.map(v => [
+                    v[0] * scaleFactorX,
+                    v[1] * scaleFactorY
+                ]);
+
+                // Draw the quadrilateral
+                ctx.beginPath();
+                ctx.moveTo(scaledVertices[0][0], scaledVertices[0][1]);
+                for (let i = 1; i < 4; i++) {
+                    ctx.lineTo(scaledVertices[i][0], scaledVertices[i][1]);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            } else {
+                // Draw as a regular rectangle for user-drawn shapes
+                const x = rect.x * scaleFactorX;
+                const y = rect.y * scaleFactorY;
+                const width = rect.width * scaleFactorX;
+                const height = rect.height * scaleFactorY;
+
+                ctx.fillRect(x, y, width, height);
+                ctx.strokeRect(x, y, width, height);
+            }
+
+            // Get coordinates for label positioning
             const x = rect.x * scaleFactorX;
             const y = rect.y * scaleFactorY;
-            const width = rect.width * scaleFactorX;
-            const height = rect.height * scaleFactorY;
 
-            ctx.fillRect(x, y, width, height);
-            ctx.strokeRect(x, y, width, height);
+            // Add a better label above each rectangle with text content
+            // Create label background
+            const labelText = rect.text || rect.info || '';
+            const truncatedText = labelText.length > 25 ? labelText.substring(0, 25) + '...' : labelText;
 
-            // Add a label to each rectangle
             ctx.font = '12px Arial';
+            const textMetrics = ctx.measureText(truncatedText);
+            const textWidth = textMetrics.width;
+
+            // Determine if label should be above or inside the rectangle (if near top of image)
+            const labelY = y < 25 ? y + 5 : y - 20;
+
+            // Draw label background
+            const labelBgColor = rect.color.replace('0.2', '0.8');
+            ctx.fillStyle = labelBgColor;
+            ctx.fillRect(x, labelY, textWidth + 10, 20);
+
+            // Add a subtle shadow to the text for better visibility
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+            ctx.shadowBlur = 2;
+            ctx.shadowOffsetX = 1;
+            ctx.shadowOffsetY = 1;
+
+            // Draw label text
             ctx.fillStyle = 'white';
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 0.5;
-            ctx.strokeText(rect.label, x + 5, y + 15);
-            ctx.fillText(rect.label, x + 5, y + 15);
+            ctx.font = 'bold 12px Arial';
+            ctx.fillText(truncatedText, x + 5, labelY + 14);
+
+            // Reset shadow for other drawing operations
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
         });
 
         // Draw temporary rectangle during drawing
         if (drawingMode && tempRect) {
-            ctx.fillStyle = 'rgba(0, 100, 255, 0.3)';
-            ctx.strokeStyle = 'rgba(0, 100, 255, 0.8)';
+            // Use a different color if the rectangle is too small
+            ctx.fillStyle = tempRect.isTooSmall ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 100, 255, 0.3)';
+            ctx.strokeStyle = tempRect.isTooSmall ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 100, 255, 0.8)';
             ctx.lineWidth = 2;
 
             const x = tempRect.x * scaleFactorX;
@@ -230,6 +285,35 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
 
             ctx.fillRect(x, y, width, height);
             ctx.strokeRect(x, y, width, height);
+
+            // Show minimum size warning if needed
+            if (tempRect.isTooSmall) {
+                const warningText = 'Too small!';
+                ctx.font = 'bold 12px Arial';
+
+                // Create background for warning text
+                const textMetrics = ctx.measureText(warningText);
+                const textWidth = textMetrics.width;
+
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+                ctx.fillRect(x, y - 20, textWidth + 10, 20);
+
+                // Add shadow for text visibility
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+                ctx.shadowBlur = 2;
+                ctx.shadowOffsetX = 1;
+                ctx.shadowOffsetY = 1;
+
+                // Draw warning text
+                ctx.fillStyle = 'white';
+                ctx.fillText(warningText, x + 5, y - 6);
+
+                // Reset shadow
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+            }
         }
     };
 
@@ -294,18 +378,31 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
 
         // Check if click is inside any rectangle
         for (const rectangle of rectangles) {
-            const rectX = rectangle.x * scaleFactorX;
-            const rectY = rectangle.y * scaleFactorY;
-            const rectWidth = rectangle.width * scaleFactorX;
-            const rectHeight = rectangle.height * scaleFactorY;
+            if (rectangle.isQuad && rectangle.vertices && rectangle.vertices.length === 4) {
+                // For quadrilaterals, test if point is inside using point-in-polygon algorithm
+                const scaledVertices = rectangle.vertices.map(v => [
+                    v[0] * scaleFactorX,
+                    v[1] * scaleFactorY
+                ]);
 
-            if (
-                mouseX >= rectX &&
-                mouseX <= rectX + rectWidth &&
-                mouseY >= rectY &&
-                mouseY <= rectY + rectHeight
-            ) {
-                return true;
+                if (isPointInPolygon(mouseX, mouseY, scaledVertices)) {
+                    return true;
+                }
+            } else {
+                // For rectangles, use the simpler bounding box check
+                const rectX = rectangle.x * scaleFactorX;
+                const rectY = rectangle.y * scaleFactorY;
+                const rectWidth = rectangle.width * scaleFactorX;
+                const rectHeight = rectangle.height * scaleFactorY;
+
+                if (
+                    mouseX >= rectX &&
+                    mouseX <= rectX + rectWidth &&
+                    mouseY >= rectY &&
+                    mouseY <= rectY + rectHeight
+                ) {
+                    return true;
+                }
             }
         }
         return false;
@@ -394,11 +491,18 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                 y: imageY / scaleFactorY
             };
 
+            const width = Math.abs(currentPosInImage.x - drawStartPos.x);
+            const height = Math.abs(currentPosInImage.y - drawStartPos.y);
+
+            // Visual feedback for minimum size
+            const isTooSmall = width < MIN_RECT_SIZE || height < MIN_RECT_SIZE;
+
             setTempRect({
                 x: Math.min(drawStartPos.x, currentPosInImage.x),
                 y: Math.min(drawStartPos.y, currentPosInImage.y),
-                width: Math.abs(currentPosInImage.x - drawStartPos.x),
-                height: Math.abs(currentPosInImage.y - drawStartPos.y)
+                width: width,
+                height: height,
+                isTooSmall: isTooSmall
             });
 
             // Force redraw to show the temporary rectangle
@@ -429,7 +533,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
     const handleMouseUp = (e) => {
         if (drawingMode && tempRect) {
             // Finish drawing the rectangle if it has a reasonable size
-            if (tempRect.width > 10 && tempRect.height > 10) {
+            if (tempRect.width >= MIN_RECT_SIZE && tempRect.height >= MIN_RECT_SIZE) {
                 const newRect = {
                     id: nextRectId,
                     x: tempRect.x,
@@ -439,7 +543,8 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                     color: RECTANGLE_COLORS[(nextRectId - 1) % RECTANGLE_COLORS.length],
                     label: `Text ${nextRectId}`,
                     text: 'New text region',
-                    confidence: 1.0
+                    confidence: 1.0,
+                    isQuad: false // Mark as a regular rectangle
                 };
 
                 setNextRectId(nextRectId + 1);
@@ -482,25 +587,57 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
         for (let i = rectangles.length - 1; i >= 0; i--) {
             const rectangle = rectangles[i];
 
-            // Apply scaling factors for JSON-based coordinates
-            const rectX = rectangle.x * scaleFactorX;
-            const rectY = rectangle.y * scaleFactorY;
-            const rectWidth = rectangle.width * scaleFactorX;
-            const rectHeight = rectangle.height * scaleFactorY;
+            if (rectangle.isQuad && rectangle.vertices && rectangle.vertices.length === 4) {
+                // For quadrilaterals, test if point is inside using point-in-polygon algorithm
+                const scaledVertices = rectangle.vertices.map(v => [
+                    v[0] * scaleFactorX,
+                    v[1] * scaleFactorY
+                ]);
 
-            if (
-                imageX >= rectX &&
-                imageX <= rectX + rectWidth &&
-                imageY >= rectY &&
-                imageY <= rectY + rectHeight
-            ) {
-                clickedRect = rectangle;
-                console.log('Selected rectangle:', rectangle.id);
-                break;
+                if (isPointInPolygon(imageX, imageY, scaledVertices)) {
+                    clickedRect = rectangle;
+                    console.log('Selected quadrilateral:', rectangle.id);
+                    break;
+                }
+            } else {
+                // For rectangles, use the simpler bounding box check
+                const rectX = rectangle.x * scaleFactorX;
+                const rectY = rectangle.y * scaleFactorY;
+                const rectWidth = rectangle.width * scaleFactorX;
+                const rectHeight = rectangle.height * scaleFactorY;
+
+                if (
+                    imageX >= rectX &&
+                    imageX <= rectX + rectWidth &&
+                    imageY >= rectY &&
+                    imageY <= rectY + rectHeight
+                ) {
+                    clickedRect = rectangle;
+                    console.log('Selected rectangle:', rectangle.id);
+                    break;
+                }
             }
         }
 
         setSelectedRect(clickedRect);
+    };
+
+    // Helper function to check if a point is inside a polygon
+    // Uses the ray casting algorithm
+    const isPointInPolygon = (x, y, vertices) => {
+        let inside = false;
+
+        for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+            const xi = vertices[i][0], yi = vertices[i][1];
+            const xj = vertices[j][0], yj = vertices[j][1];
+
+            const intersect = ((yi > y) !== (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+
+            if (intersect) inside = !inside;
+        }
+
+        return inside;
     };
 
     // Handle zoom in/out
@@ -566,6 +703,77 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
             setNextRectId(maxId + 1);
         }
     }, [rectangles]);
+
+    // Function to prepare data for export in the same format as input
+    const prepareExportData = () => {
+        // Default structure for the export data
+        const exportData = {
+            results: []
+        };
+
+        // If we have the original page dimensions, include them
+        if (pageWidth && pageHeight) {
+            exportData.page_width = pageWidth;
+            exportData.page_heigth = pageHeight; // Maintaining same property name as input
+        }
+
+        // Convert our rectangles to the expected output format
+        exportData.results = rectangles.map(rect => {
+            const result = {
+                text: rect.text || '',
+                confidence: rect.confidence || 1.0
+            };
+
+            // If we have vertices (from imported data or calculated), use them
+            if (rect.isQuad && rect.vertices && rect.vertices.length === 4) {
+                result.vertices = rect.vertices;
+            } else {
+                // For user-drawn rectangles, create vertices from the bounding box
+                // This creates a rectangular quadrilateral from the bounds
+                result.vertices = [
+                    [rect.x, rect.y],                         // Top-left
+                    [rect.x + rect.width, rect.y],            // Top-right
+                    [rect.x + rect.width, rect.y + rect.height], // Bottom-right
+                    [rect.x, rect.y + rect.height]            // Bottom-left
+                ];
+            }
+
+            return result;
+        });
+
+        return exportData;
+    };
+
+    // Handle export to JSON file
+    const handleExport = () => {
+        // Prepare the data in the same format as input
+        const exportData = prepareExportData();
+
+        // Convert to JSON string with nice formatting
+        const jsonString = JSON.stringify(exportData, null, 2);
+
+        // Create a Blob with the JSON data
+        const blob = new Blob([jsonString], { type: 'application/json' });
+
+        // Create a URL for the Blob
+        const url = URL.createObjectURL(blob);
+
+        // Create a temporary anchor element to trigger the download
+        const a = document.createElement('a');
+        a.href = url;
+
+        // Set the filename using the current date/time for uniqueness
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.download = `ocr-export-${timestamp}.json`;
+
+        // Append the anchor to the document, click it, and remove it
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // Release the Blob URL to free up resources
+        URL.revokeObjectURL(url);
+    };
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -701,7 +909,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                     </div>
                 </div>
 
-                <div className="flex flex-1 overflow-hidden">
+                <div className="flex flex-1 overflow-hidden relative">
                     {/* Canvas Container */}
                     <div
                         ref={containerRef}
@@ -740,6 +948,19 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 }}
                             />
                         </div>
+
+                        {/* Export Button - Bottom Right */}
+                        <div className="absolute bottom-4 right-4 z-10">
+                            <button
+                                onClick={handleExport}
+                                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 transition-colors"
+                                title="Save & Export changes"
+                            >
+                                <Save className="w-4 h-4" />
+                                <span>Save & Export</span>
+                                <Download className="w-4 h-4" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* Info Panel */}
@@ -765,7 +986,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                 <h4 className="font-medium text-indigo-700 mb-2 flex items-center">
                                     <span
                                         className="w-3 h-3 rounded-full mr-2"
-                                        style={{ backgroundColor: selectedRect.color.replace('0.4', '1') }}
+                                        style={{ backgroundColor: selectedRect.color.replace('0.2', '1') }}
                                     ></span>
                                     {selectedRect.label}
                                 </h4>
@@ -825,7 +1046,7 @@ function ImageViewer({ imageUrl, imageData, onClose }) {
                                     >
                                         <span
                                             className="w-3 h-3 rounded-full mr-2"
-                                            style={{ backgroundColor: rect.color.replace('0.4', '1') }}
+                                            style={{ backgroundColor: rect.color.replace('0.2', '1') }}
                                         ></span>
                                         <div className="flex-1 truncate">
                                             <span className="mr-2">{rect.label}</span>
