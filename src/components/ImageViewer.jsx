@@ -1215,12 +1215,33 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                         <h3 className="font-medium">Image Viewer with Annotations</h3>
                         <button
                             onClick={toggleStyleSettings}
-                            className="px-3 py-1 bg-indigo-800 rounded hover:bg-indigo-900 flex items-center gap-1"
+                            className="px-3 cursor-pointer py-1 bg-indigo-800 rounded hover:bg-indigo-900 flex items-center gap-1"
                             title="Style Settings"
                         >
                             <Settings className="w-4 h-4" />
                             <span>Style</span>
                         </button>
+
+                        <button
+                            onClick={() => setIsMultiSelectMode(!isMultiSelectMode)}
+                            className={`px-3 py-1 cursor-pointer  rounded ${isMultiSelectMode ? 'bg-blue-500 text-white' : 'bg-white text-gray-800'} flex items-center gap-1`}
+                            title="Toggle multi-select mode"
+                        >
+                            <Square className="w-4 h-4" />
+                            <span>Select</span>
+                        </button>
+
+                        {(selectedRect || selectedRects.length > 0) && (
+                            <button
+                                onClick={toggleMarkSelectedRects}
+                                className={`px-3 py-1 cursor-pointer  rounded bg-orange-500 hover:bg-orange-600 text-white flex items-center gap-1`}
+                                title={`${selectedRects.length > 0 ? `Mark ${selectedRects.length} regions` : 'Mark region'}`}
+                            >
+                                <Check className="w-4 h-4" />
+                                <span>Mark</span>
+                            </button>
+                        )}
+
                     </div>
                     <div className="flex items-center space-x-4">
                         <button
@@ -1716,40 +1737,11 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
             </div>
 
             {/* Top toolbar - Move buttons to top left */}
-            <div className="absolute top-4 left-4 z-10 flex space-x-2">
-                {/* Style settings button */}
-                <button
-                    className={`p-2 rounded-full ${styleSettingsOpen ? 'bg-indigo-500 text-white' : 'bg-white text-gray-800'}`}
-                    onClick={() => setStyleSettingsOpen(!styleSettingsOpen)}
-                    title="Style Settings"
-                >
-                    <Sliders className="w-5 h-5" />
-                </button>
 
-                {/* Multi-select button */}
-                <button
-                    className={`p-2 rounded-full ${isMultiSelectMode ? 'bg-blue-500 text-white' : 'bg-white text-gray-800'}`}
-                    onClick={() => setIsMultiSelectMode(!isMultiSelectMode)}
-                    title="Toggle multi-select mode"
-                >
-                    <Square className="w-5 h-5" />
-                </button>
-
-                {/* Mark/unmark button - changed to orange and only show when something is selected */}
-                {(selectedRect || selectedRects.length > 0) && (
-                    <button
-                        className="p-2 rounded-full bg-orange-500 hover:bg-orange-600 text-white"
-                        onClick={toggleMarkSelectedRects}
-                        title={`${selectedRects.length > 0 ? `Mark ${selectedRects.length} regions` : 'Mark region'}`}
-                    >
-                        <Check className="w-5 h-5" />
-                    </button>
-                )}
-            </div>
 
             {/* Show info when in multi-select mode */}
             {isMultiSelectMode && (
-                <div className="absolute top-16 left-4 bg-blue-600 text-white text-sm px-3 py-1 rounded-md shadow-md flex items-center gap-1">
+                <div className="absolute top-22 left-8 bg-blue-600 text-white text-sm px-3 py-1 rounded-md shadow-md flex items-center gap-1">
                     <Square className="w-4 h-4" />
                     <span>Drag to select multiple regions</span>
                 </div>
