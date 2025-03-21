@@ -62,7 +62,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     const [nextRectId, setNextRectId] = useState(1);
     const [styleSettingsOpen, setStyleSettingsOpen] = useState(false);
     const initialStyleSettings = {
-        fillOpacity: 0.2,
+        fillOpacity: 0.15,
         strokeWidth: 2,
         labelBgOpacity: 0.8,
         fontSize: 16,
@@ -73,6 +73,9 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     const [styleSettings, setStyleSettings] = useState(initialStyleSettings);
     const [pendingColor, setPendingColor] = useState(null);
     const previewRectRef = useRef(null);
+    const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+    const [selectedRects, setSelectedRects] = useState([]);
+    const [multiSelectBox, setMultiSelectBox] = useState(null);
 
     // Process JSON data to create rectangles
     const processJsonData = useMemo(() => {
@@ -114,7 +117,8 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                         text: item.text || 'No text available',
                         confidence: item.confidence || 'N/A',
                         vertices: vertices,
-                        isQuad: true // Flag to identify shapes from JSON with vertices
+                        isQuad: true, // Flag to identify shapes from JSON with vertices
+                        marked: false // Add marked property, default to false
                     };
                 }).filter(Boolean); // Remove any null values
             }
@@ -158,7 +162,8 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                             text: item.text || 'No text available',
                             confidence: item.confidence || 'N/A',
                             vertices: vertices,
-                            isQuad: true // Flag to identify shapes from JSON with vertices
+                            isQuad: true, // Flag to identify shapes from JSON with vertices
+                            marked: false // Add marked property, default to false
                         };
                     }).filter(Boolean); // Remove any null values
                 }
@@ -197,7 +202,8 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                         text: item.text || 'No text available',
                         confidence: item.confidence || 'N/A',
                         vertices: vertices,
-                        isQuad: true // Flag to identify shapes from JSON with vertices
+                        isQuad: true, // Flag to identify shapes from JSON with vertices
+                        marked: false // Add marked property, default to false
                     };
                 }).filter(Boolean);
             }
@@ -317,8 +323,12 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
 
         // Draw rectangles with scaling applied if needed
         rectangles.forEach(rect => {
+            // Check if rectangle is selected (either single or in multi-select)
+            const isSelected = (selectedRect && selectedRect.id === rect.id) ||
+                (selectedRects.includes(rect.id));
+
             // Use a different style for the selected rectangle
-            if (selectedRect && selectedRect.id === rect.id) {
+            if (isSelected) {
                 ctx.fillStyle = rect.color.replace(/[\d.]+\)$/, `${styleSettings.fillOpacity * 2})`);
                 ctx.strokeStyle = '#FFFF00';
                 ctx.lineWidth = styleSettings.strokeWidth + 1;
@@ -355,6 +365,32 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
 
                 ctx.fillRect(x, y, width, height);
                 ctx.strokeRect(x, y, width, height);
+            }
+
+            // Draw mark indicator if the rectangle is marked - make it more visible
+            if (rect.marked) {
+                const x = rect.x * scaleFactorX;
+                const y = rect.y * scaleFactorY;
+
+                // Draw a more prominent checkmark indicator
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.5)'; // Bright green background
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+
+                // Draw circle background - larger and more visible
+                ctx.beginPath();
+                ctx.arc(x + 15, y + 15, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // Draw checkmark - thicker and more visible
+                ctx.beginPath();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 3;
+                ctx.moveTo(x + 10, y + 15);
+                ctx.lineTo(x + 14, y + 19);
+                ctx.lineTo(x + 20, y + 11);
+                ctx.stroke();
             }
 
             // Only draw labels if the setting is enabled
@@ -447,6 +483,25 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                 ctx.shadowOffsetX = 0;
                 ctx.shadowOffsetY = 0;
             }
+        }
+
+        // Draw multi-select box if active - make it more visible while dragging
+        if (multiSelectBox && isMultiSelectMode && isDragging) {
+            ctx.strokeStyle = 'rgba(0, 102, 255, 0.8)'; // More visible blue
+            ctx.fillStyle = 'rgba(0, 102, 255, 0.1)'; // Light blue fill
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+
+            // Calculate normalized dimensions (handling negative width/height)
+            const x = multiSelectBox.width < 0 ? multiSelectBox.x + multiSelectBox.width : multiSelectBox.x;
+            const y = multiSelectBox.height < 0 ? multiSelectBox.y + multiSelectBox.height : multiSelectBox.y;
+            const width = Math.abs(multiSelectBox.width);
+            const height = Math.abs(multiSelectBox.height);
+
+            // Draw filled rectangle with border
+            ctx.fillRect(x, y, width, height);
+            ctx.strokeRect(x, y, width, height);
+            ctx.setLineDash([]);
         }
     };
 
@@ -587,6 +642,23 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
             return;
         }
 
+        if (isMultiSelectMode) {
+            // Start drawing multi-select box
+            const rect = canvasRef.current.getBoundingClientRect();
+            const canvasX = (e.clientX - rect.left) / scale;
+            const canvasY = (e.clientY - rect.top) / scale;
+
+            setMultiSelectBox({
+                x: canvasX,
+                y: canvasY,
+                width: 0,
+                height: 0
+            });
+
+            setIsDragging(true);
+            return;
+        }
+
         // If we're clicking on a rectangle, prioritize selection over panning
         if (isClickOnRectangle(e)) {
             setHasMovedDuringClick(false);
@@ -643,6 +715,27 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
             return;
         }
 
+        if (isDragging && isMultiSelectMode && multiSelectBox) {
+            // Update multi-select box dimensions
+            const rect = canvasRef.current.getBoundingClientRect();
+            const canvasX = (e.clientX - rect.left) / scale;
+            const canvasY = (e.clientY - rect.top) / scale;
+
+            setMultiSelectBox(prev => ({
+                x: prev.x,
+                y: prev.y,
+                width: canvasX - prev.x,
+                height: canvasY - prev.y
+            }));
+
+            // Redraw canvas to show the selection box
+            requestAnimationFrame(drawCanvas);
+
+            // Set flag that we've moved during this click
+            setHasMovedDuringClick(true);
+            return;
+        }
+
         if (!isDragging) return;
 
         // Check if we've moved significantly from the click start position
@@ -677,7 +770,8 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                     label: `Text ${nextRectId}`,
                     text: 'New text region',
                     confidence: 1.0,
-                    isQuad: false // Mark as a regular rectangle
+                    isQuad: false, // Mark as a regular rectangle
+                    marked: false // Add marked property, default to false
                 };
 
                 setNextRectId(nextRectId + 1);
@@ -687,6 +781,35 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
 
             setTempRect(null);
             setDrawingMode(false);
+            return;
+        }
+
+        if (isDragging && isMultiSelectMode && multiSelectBox) {
+            // Calculate which rectangles are inside the selection box
+            const selectedIds = rectangles
+                .filter(rect => {
+                    // Normalize the selection box in case of negative width/height
+                    const selBox = {
+                        x: multiSelectBox.width < 0 ? multiSelectBox.x + multiSelectBox.width : multiSelectBox.x,
+                        y: multiSelectBox.height < 0 ? multiSelectBox.y + multiSelectBox.height : multiSelectBox.y,
+                        width: Math.abs(multiSelectBox.width),
+                        height: Math.abs(multiSelectBox.height)
+                    };
+
+                    // Check if rectangle is inside selection box
+                    return (
+                        rect.x * scaleFactorX >= selBox.x &&
+                        rect.y * scaleFactorY >= selBox.y &&
+                        (rect.x + rect.width) * scaleFactorX <= selBox.x + selBox.width &&
+                        (rect.y + rect.height) * scaleFactorY <= selBox.y + selBox.height
+                    );
+                })
+                .map(rect => rect.id);
+
+            setSelectedRects(selectedIds);
+            setSelectedRect(null); // Clear single selection
+            setMultiSelectBox(null);
+            setIsDragging(false);
             return;
         }
 
@@ -868,7 +991,8 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
         exportData.ocr_results = rectangles.map(rect => {
             const result = {
                 text: rect.text || '',
-                confidence: rect.confidence || 1.0
+                confidence: rect.confidence || 1.0,
+                marked: rect.marked || false // Add marked property to export
             };
 
             // If we have vertices (from imported data or calculated), use them
@@ -995,6 +1119,34 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
         }));
     };
 
+    // Add a handler for marking/unmarking selected rectangles
+    const toggleMarkSelectedRects = () => {
+        if (selectedRects.length > 0) {
+            setRectangles(prevRects =>
+                prevRects.map(rect => {
+                    if (selectedRects.includes(rect.id)) {
+                        return { ...rect, marked: !rect.marked };
+                    }
+                    return rect;
+                })
+            );
+            // Clear selection after marking
+            setSelectedRects([]);
+            setIsMultiSelectMode(false);
+        } else if (selectedRect) {
+            setRectangles(prevRects =>
+                prevRects.map(rect => {
+                    if (rect.id === selectedRect.id) {
+                        return { ...rect, marked: !rect.marked };
+                    }
+                    return rect;
+                })
+            );
+            // Clear selection after marking
+            setSelectedRect(null);
+        }
+    };
+
     useEffect(() => {
         const canvas = canvasRef.current;
         const image = imageRef.current;
@@ -1056,7 +1208,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     }, [selectedRect, scale, scaleFactorX, scaleFactorY, rectangles]);
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 backdrop-blur-sm p-2">
+        <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex justify-center items-center p-4 overflow-hidden">
             <div className="relative w-full h-full bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col">
                 <div className="bg-indigo-700 text-white p-4 flex justify-between items-center">
                     <div className="flex items-center gap-4">
@@ -1526,8 +1678,21 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                                 {rectangles.map(rect => (
                                     <div
                                         key={rect.id}
-                                        className={`p-2 rounded cursor-pointer flex items-center ${selectedRect?.id === rect.id ? 'bg-indigo-100 border border-indigo-300' : 'bg-white hover:bg-gray-50'}`}
-                                        onClick={() => setSelectedRect(rect)}
+                                        className={`p-2 rounded cursor-pointer flex items-center 
+                                            ${(selectedRect?.id === rect.id || selectedRects.includes(rect.id))
+                                                ? 'bg-indigo-100 border border-indigo-300' : 'bg-white hover:bg-gray-50'}`}
+                                        onClick={() => {
+                                            if (isMultiSelectMode) {
+                                                setSelectedRects(prev =>
+                                                    prev.includes(rect.id)
+                                                        ? prev.filter(id => id !== rect.id)
+                                                        : [...prev, rect.id]
+                                                );
+                                            } else {
+                                                setSelectedRect(rect);
+                                                setSelectedRects([]);
+                                            }
+                                        }}
                                     >
                                         <span
                                             className="w-3 h-3 rounded-full mr-2"
@@ -1539,6 +1704,9 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                                                 {rect.text ? `"${rect.text}"` : ''}
                                             </span>
                                         </div>
+                                        {rect.marked && (
+                                            <Check className="w-4 h-4 text-green-500 ml-2" />
+                                        )}
                                     </div>
                                 ))}
                             </div>
@@ -1546,6 +1714,46 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                     </div>
                 </div>
             </div>
+
+            {/* Top toolbar - Move buttons to top left */}
+            <div className="absolute top-4 left-4 z-10 flex space-x-2">
+                {/* Style settings button */}
+                <button
+                    className={`p-2 rounded-full ${styleSettingsOpen ? 'bg-indigo-500 text-white' : 'bg-white text-gray-800'}`}
+                    onClick={() => setStyleSettingsOpen(!styleSettingsOpen)}
+                    title="Style Settings"
+                >
+                    <Sliders className="w-5 h-5" />
+                </button>
+
+                {/* Multi-select button */}
+                <button
+                    className={`p-2 rounded-full ${isMultiSelectMode ? 'bg-blue-500 text-white' : 'bg-white text-gray-800'}`}
+                    onClick={() => setIsMultiSelectMode(!isMultiSelectMode)}
+                    title="Toggle multi-select mode"
+                >
+                    <Square className="w-5 h-5" />
+                </button>
+
+                {/* Mark/unmark button - changed to orange and only show when something is selected */}
+                {(selectedRect || selectedRects.length > 0) && (
+                    <button
+                        className="p-2 rounded-full bg-orange-500 hover:bg-orange-600 text-white"
+                        onClick={toggleMarkSelectedRects}
+                        title={`${selectedRects.length > 0 ? `Mark ${selectedRects.length} regions` : 'Mark region'}`}
+                    >
+                        <Check className="w-5 h-5" />
+                    </button>
+                )}
+            </div>
+
+            {/* Show info when in multi-select mode */}
+            {isMultiSelectMode && (
+                <div className="absolute top-16 left-4 bg-blue-600 text-white text-sm px-3 py-1 rounded-md shadow-md flex items-center gap-1">
+                    <Square className="w-4 h-4" />
+                    <span>Drag to select multiple regions</span>
+                </div>
+            )}
         </div>
     );
 }
