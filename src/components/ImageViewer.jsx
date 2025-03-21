@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { X, Info, AlertCircle, ZoomIn, ZoomOut, Maximize, Trash2, Plus, Square, Save, Download, Settings, Sliders, PaintBucket, Type, Brush, Eye, EyeOff, Check } from 'lucide-react';
 
 // Fallback demo rectangles if no JSON data is provided
@@ -40,6 +40,23 @@ const RECTANGLE_COLORS = [
 // Constants for the application
 const MIN_RECT_SIZE = 5; // Minimum size for rectangles in original coordinates
 
+// Modify the initialStyleSettings area to first check localStorage
+const defaultStyleSettings = {
+    fillOpacity: 0.15,
+    strokeWidth: 2,
+    labelBgOpacity: 0.8,
+    fontSize: 16,
+    fontColor: "#ffffff",
+    showLabels: true,
+    colors: ["rgba(255, 0, 0, 0.2)", "rgba(0, 0, 255, 0.2)"]
+};
+
+// Load saved settings from localStorage or use defaults
+const getSavedStyleSettings = () => {
+    const savedSettings = localStorage.getItem('tifViewerStyleSettings');
+    return savedSettings ? JSON.parse(savedSettings) : defaultStyleSettings;
+};
+
 function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     const canvasRef = useRef(null);
     const containerRef = useRef(null);
@@ -61,21 +78,13 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     const [tempRect, setTempRect] = useState(null);
     const [nextRectId, setNextRectId] = useState(1);
     const [styleSettingsOpen, setStyleSettingsOpen] = useState(false);
-    const initialStyleSettings = {
-        fillOpacity: 0.15,
-        strokeWidth: 2,
-        labelBgOpacity: 0.8,
-        fontSize: 16,
-        fontColor: "#ffffff",
-        showLabels: true,
-        colors: ["rgba(255, 0, 0, 0.2)", "rgba(0, 0, 255, 0.2)"]
-    };
-    const [styleSettings, setStyleSettings] = useState(initialStyleSettings);
+    const [styleSettings, setStyleSettings] = useState(getSavedStyleSettings());
     const [pendingColor, setPendingColor] = useState(null);
     const previewRectRef = useRef(null);
     const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
     const [selectedRects, setSelectedRects] = useState([]);
     const [multiSelectBox, setMultiSelectBox] = useState(null);
+    const [focusMode, setFocusMode] = useState(false);
 
     // Process JSON data to create rectangles
     const processJsonData = useMemo(() => {
@@ -106,13 +115,14 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                     const maxX = Math.max(...xs);
                     const maxY = Math.max(...ys);
 
+                    const colorIndex = index % styleSettings.colors.length;
                     return {
                         id: index + 1,
                         x: minX,
                         y: minY,
                         width: maxX - minX,
                         height: maxY - minY,
-                        color: RECTANGLE_COLORS[index % RECTANGLE_COLORS.length],
+                        color: styleSettings.colors[colorIndex],
                         label: `Text ${index + 1}`,
                         text: item.text || 'No text available',
                         confidence: item.confidence || 'N/A',
@@ -151,13 +161,14 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                         const maxX = Math.max(...xs);
                         const maxY = Math.max(...ys);
 
+                        const colorIndex = index % styleSettings.colors.length;
                         return {
                             id: index + 1,
                             x: minX,
                             y: minY,
                             width: maxX - minX,
                             height: maxY - minY,
-                            color: RECTANGLE_COLORS[index % RECTANGLE_COLORS.length],
+                            color: styleSettings.colors[colorIndex],
                             label: `Text ${index + 1}`,
                             text: item.text || 'No text available',
                             confidence: item.confidence || 'N/A',
@@ -191,13 +202,14 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                     const maxX = Math.max(...xs);
                     const maxY = Math.max(...ys);
 
+                    const colorIndex = index % styleSettings.colors.length;
                     return {
                         id: index + 1,
                         x: minX,
                         y: minY,
                         width: maxX - minX,
                         height: maxY - minY,
-                        color: RECTANGLE_COLORS[index % RECTANGLE_COLORS.length],
+                        color: styleSettings.colors[colorIndex],
                         label: `Text ${index + 1}`,
                         text: item.text || 'No text available',
                         confidence: item.confidence || 'N/A',
@@ -213,7 +225,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
 
         // Fallback to demo rectangles if JSON processing fails
         return demoRectangles;
-    }, [imageData]);
+    }, [imageData, styleSettings.colors]);
 
     // Use effect to set rectangles when processJsonData changes
     useEffect(() => {
@@ -307,7 +319,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     }, [styleSettings, styleSettingsOpen]);
 
     // Draw everything (image + rectangles)
-    const drawCanvas = () => {
+    const drawCanvas = useCallback(() => {
         const canvas = canvasRef.current;
         const image = imageRef.current;
 
@@ -323,6 +335,11 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
 
         // Draw rectangles with scaling applied if needed
         rectangles.forEach(rect => {
+            // Skip drawing this rectangle if in focus mode and it's not the selected one
+            if (focusMode && selectedRect && rect.id !== selectedRect.id) {
+                return;
+            }
+
             // Check if rectangle is selected (either single or in multi-select)
             const isSelected = (selectedRect && selectedRect.id === rect.id) ||
                 (selectedRects.includes(rect.id));
@@ -503,7 +520,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
             ctx.strokeRect(x, y, width, height);
             ctx.setLineDash([]);
         }
-    };
+    }, [rectangles, scale, scaleFactorX, scaleFactorY, selectedRect, selectedRects, isMultiSelectMode, isDragging, multiSelectBox, styleSettings, drawingMode, tempRect, focusMode]);
 
     // Calculate the fitting scale for the initial view
     const calculateFitScale = () => {
@@ -1061,20 +1078,20 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     };
 
     // Apply current style settings to all rectangles in order
-    const applyColorsToRectangles = () => {
-        if (rectangles.length === 0 || styleSettings.colors.length === 0) return;
+    // const applyColorsToRectangles = () => {
+    //     if (rectangles.length === 0 || styleSettings.colors.length === 0) return;
 
-        const updatedRectangles = rectangles.map((rect, index) => {
-            // Assign colors in sequence, cycling through the available colors
-            const colorIndex = index % styleSettings.colors.length;
-            return {
-                ...rect,
-                color: styleSettings.colors[colorIndex]
-            };
-        });
+    //     const updatedRectangles = rectangles.map((rect, index) => {
+    //         // Assign colors in sequence, cycling through the available colors
+    //         const colorIndex = index % styleSettings.colors.length;
+    //         return {
+    //             ...rect,
+    //             color: styleSettings.colors[colorIndex]
+    //         };
+    //     });
 
-        setRectangles(updatedRectangles);
-    };
+    //     setRectangles(updatedRectangles);
+    // };
 
     // Remove color from palette
     const removeColor = (indexToRemove) => {
@@ -1090,24 +1107,20 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     };
 
     // Toggle style settings panel
-    const toggleStyleSettings = (shouldApply = false) => {
-        if (!styleSettingsOpen) {
-            // Opening the panel - nothing special needed
-            setStyleSettingsOpen(true);
+    const toggleStyleSettings = (save = null) => {
+        if (save === true) {
+            // When applying settings, save to localStorage
+            localStorage.setItem('tifViewerStyleSettings', JSON.stringify(styleSettings));
+            setStyleSettingsOpen(false);
+        } else if (save === false) {
+            // When resetting, immediately apply default settings
+            const defaultSettings = { ...defaultStyleSettings };
+            setStyleSettings(defaultSettings);
+            localStorage.setItem('tifViewerStyleSettings', JSON.stringify(defaultSettings));
+            setStyleSettingsOpen(false);
         } else {
-            // Closing the panel
-            if (shouldApply === true) {
-                // Apply button was clicked - apply colors to rectangles
-                applyColorsToRectangles();
-                setStyleSettingsOpen(false);
-            } else if (shouldApply === false) {
-                // Reset button was clicked - reset to initial values
-                setStyleSettings(initialStyleSettings);
-                // Keep the panel open to show the reset values
-            } else {
-                // X button was clicked - just close without applying
-                setStyleSettingsOpen(false);
-            }
+            // Just toggle the panel without saving
+            setStyleSettingsOpen(!styleSettingsOpen);
         }
     };
 
@@ -1146,6 +1159,38 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
             setSelectedRect(null);
         }
     };
+
+    // Fix color assignment to ensure all rectangles use the color palette
+    useEffect(() => {
+        // Assign colors to rectangles when rectangles or color palette changes
+        if (rectangles.length > 0 && styleSettings.colors.length > 0) {
+            const updatedRectangles = rectangles.map((rect, index) => {
+                // Assign color from palette, cycling through available colors
+                const colorIndex = index % styleSettings.colors.length;
+                return {
+                    ...rect,
+                    color: styleSettings.colors[colorIndex]
+                };
+            });
+
+            // Update rectangles with new colors
+            setRectangles(updatedRectangles);
+        }
+    }, [styleSettings.colors]); // Only re-run when the color palette changes
+
+    // // Make sure when adding colors we trigger redraw
+    // const addColor = () => {
+    //     const newColor = `rgba(${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, 0.2)`;
+    //     setStyleSettings(prev => {
+    //         const updated = {
+    //             ...prev,
+    //             colors: [...prev.colors, newColor]
+    //         };
+    //         // Save to localStorage immediately
+    //         localStorage.setItem('tifViewerStyleSettings', JSON.stringify(updated));
+    //         return updated;
+    //     });
+    // };
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -1207,6 +1252,21 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
         drawCanvas();
     }, [selectedRect, scale, scaleFactorX, scaleFactorY, rectangles]);
 
+    // Add a new effect to ensure colors are applied when styleSettings change
+    useEffect(() => {
+        // If we already have rectangles but styleSettings change (like on reload)
+        if (rectangles.length > 0 && styleSettings.colors.length > 0) {
+            const updatedRectangles = rectangles.map((rect, index) => {
+                const colorIndex = index % styleSettings.colors.length;
+                return {
+                    ...rect,
+                    color: styleSettings.colors[colorIndex]
+                };
+            });
+            setRectangles(updatedRectangles);
+        }
+    }, [styleSettings]); // This will run when styleSettings are loaded from localStorage
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex justify-center items-center p-4 overflow-hidden">
             <div className="relative w-full h-full bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col">
@@ -1230,6 +1290,8 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                             <Square className="w-4 h-4" />
                             <span>Select</span>
                         </button>
+
+
 
                         {(selectedRect || selectedRects.length > 0) && (
                             <button
@@ -1279,6 +1341,14 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                             <Maximize className="w-4 h-4" />
                             <span>Fit</span>
                         </button>
+                        <button
+                            onClick={() => setFocusMode(!focusMode)}
+                            className={`px-3 py-1 cursor-pointer rounded ${focusMode ? 'bg-pink-500 text-white' : 'bg-indigo-50 text-gray-800'} flex items-center gap-1`}
+                            title="Toggle focus mode"
+                        >
+                            <Eye className="w-4 h-4" />
+                            <span>Focus Mode</span>
+                        </button>
                         <div className="flex items-center bg-indigo-800 rounded px-2 py-1">
                             <button
                                 onClick={() => handleZoom(false)}
@@ -1302,6 +1372,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
                                 <ZoomIn className="w-4 h-4" />
                             </button>
                             <span className="ml-2 text-xs">{Math.round(scale * 100)}%</span>
+
                         </div>
                         <button
                             onClick={onClose}
@@ -1743,7 +1814,7 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
             {isMultiSelectMode && (
                 <div className="absolute top-22 left-8 bg-blue-600 text-white text-sm px-3 py-1 rounded-md shadow-md flex items-center gap-1">
                     <Square className="w-4 h-4" />
-                    <span>Drag to select multiple regions</span>
+                    <span>Drag and fully select multiple regions</span>
                 </div>
             )}
         </div>
