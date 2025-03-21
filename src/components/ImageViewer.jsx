@@ -554,15 +554,14 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
         const image = imageRef.current;
 
         if (container && image) {
-            const containerWidth = container.clientWidth;
-            const containerHeight = container.clientHeight;
-            const scaledWidth = image.width * fitScale;
-            const scaledHeight = image.height * fitScale;
+            // const containerWidth = container.clientWidth;
+            // const containerHeight = container.clientHeight;
+            // const scaledWidth = image.width * fitScale;
+            // const scaledHeight = image.height * fitScale;
 
-            // Center position calculation - ensure the image is truly centered
-            const newPosX = (containerWidth - scaledWidth) - (0.5 * containerWidth)
-            const newPosY = (containerHeight - scaledHeight) / 2;
-
+            // Fix the centering calculation
+            const newPosX = 0;
+            const newPosY = 0;
 
             setScale(fitScale);
             setPosition({ x: newPosX, y: newPosY });
@@ -932,25 +931,33 @@ function ImageViewer({ imageUrl, imageName, imageData, onClose }) {
     const handleWheel = (e) => {
         e.preventDefault();
 
-        // Use percentage-based scaling (4% per scroll event)
-        const zoomFactor = e.deltaY < 0 ? 1.06 : 0.94; // 4% zoom in or out
-        const newScale = Math.max(0.1, Math.min(10, scale * zoomFactor)); // Limit scale between 0.1 and 10
+        // 4% zoom in/out per scroll event
+        const zoomFactor = e.deltaY < 0 ? 1.06 : 0.94;
+        const newScale = Math.max(0.02, Math.min(10, scale * zoomFactor));
 
         if (newScale !== scale) {
-            // Calculate mouse position relative to canvas
+            // Get the container’s bounding rectangle
             const rect = containerRef.current.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
 
-            // Calculate new position that keeps the point under mouse in same relative position
-            const scaleChange = newScale / scale;
-            const newX = mouseX - (mouseX - position.x) * scaleChange;
-            const newY = mouseY - (mouseY - position.y) * scaleChange;
+            // Calculate the center of the container
+            const centerX = rect.width / 2;
+            const centerY = rect.height / 2;
+
+            // Compute mouse coordinates relative to the center
+            const mouseX = e.clientX - rect.left - centerX;
+            const mouseY = e.clientY - rect.top - centerY;
+
+            // When zooming, we want the content under the mouse (in the centered system)
+            // to stay fixed. The transformation is then:
+            // newPosition = mouse + (oldPosition - mouse) * (newScale / oldScale)
+            const newX = mouseX + (position.x - mouseX) * (newScale / scale);
+            const newY = mouseY + (position.y - mouseY) * (newScale / scale);
 
             setScale(newScale);
             setPosition({ x: newX, y: newY });
         }
     };
+
 
     // Handle keyboard shortcuts for zoom
     const handleKeyDown = (e) => {
